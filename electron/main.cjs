@@ -1,10 +1,23 @@
 const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs/promises');
+const { execFile } = require('node:child_process');
+const { promisify } = require('node:util');
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const systemInformation = require('systeminformation');
 
+const execFileAsync = promisify(execFile);
 let staticInventoryPromise;
+let cpuInventoryPromise;
+let applicationSessionCache = new Map();
+
+const desktopServiceNames = new Set([
+  'at-spi-bus-launcher', 'at-spi2-registryd', 'dbus-daemon', 'dconf-service', 'gnome-keyring-daemon',
+  'gnome-shell', 'gnome-session-binary', 'gnome-session', 'gnome-settings-daemon', 'gsd-xsettings',
+  'ibus-daemon', 'kwin_wayland', 'kwin_x11', 'mutter', 'pipewire', 'pipewire-pulse', 'plasmashell',
+  'pulseaudio', 'sway', 'systemd', 'waybar', 'wireplumber', 'xwayland', 'xorg',
+  'xdg-desktop-portal', 'xdg-document-portal', 'xdg-permission-store',
+]);
 
 const readSafely = async (reader, fallback = null) => {
   try {
@@ -56,6 +69,135 @@ async function readLinuxFanSpeeds() {
   return readings.flat().filter(Boolean).slice(0, 32);
 }
 
+async function readLinuxPciLink(busAddress) {
+  if (process.platform !== 'linux' || !/^[\da-f]{4}:[\da-f]{2}:[\da-f]{2}\.[0-7]$/i.test(busAddress || '')) return null;
+
+  const directory = path.join('/sys/bus/pci/devices', busAddress);
+  const [currentSpeed, currentWidth, maxSpeed, maxWidth] = await Promise.all([
+    'current_link_speed', 'current_link_width', 'max_link_speed', 'max_link_width',
+  ].map((file) => readSafely(() => fs.readFile(path.join(directory, file), 'utf8').then((value) => value.trim()), null)));
+
+  return { currentSpeed, currentWidth, maxSpeed, maxWidth };
+}
+
+async function readLinuxBootMode() {
+  if (process.platform !== 'linux') return null;
+  return readSafely(() => fs.access('/sys/firmware/efi').then(() => 'UEFI'), 'Legacy BIOS / UEFI interface unavailable');
+}
+
+async function readLinuxCpuInventory() {
+  if (process.platform !== 'linux') return {};
+  if (!cpuInventoryPromise) {
+    cpuInventoryPromise = (async () => {
+      const result = await readSafely(() => execFileAsync('lscpu', ['--json'], {
+        encoding: 'utf8',
+        timeout: 3000,
+        maxBuffer: 256 * 1024,
+      }), null);
+      if (!result?.stdout) return {};
+
+      const rows = await readSafely(() => JSON.parse(result.stdout).lscpu || [], []);
+      const values = new Map(rows.map(({ field, data }) => [field.replace(/:$/, '').trim(), String(data || '').trim()]));
+      const number = (field) => {
+        const parsed = Number.parseFloat((values.get(field) || '').replace(/,/g, ''));
+        return Number.isFinite(parsed) ? parsed : null;
+      };
+
+      return {
+        architecture: values.get('Architecture') || null,
+        operationModes: values.get('CPU op-mode(s)') || null,
+        byteOrder: values.get('Byte Order') || null,
+        vendorId: values.get('Vendor ID') || null,
+        family: values.get('CPU family') || null,
+        model: values.get('Model') || null,
+        stepping: values.get('Stepping') || null,
+        currentMhz: number('CPU MHz'),
+        minimumMhz: number('CPU min MHz'),
+        maximumMhz: number('CPU max MHz'),
+        bogoMips: number('BogoMIPS'),
+        virtualization: values.get('Virtualization') || null,
+        hypervisorVendor: values.get('Hypervisor vendor') || null,
+        threadsPerCore: number('Thread(s) per core'),
+        coresPerSocket: number('Core(s) per socket'),
+        sockets: number('Socket(s)'),
+        numaNodes: number('NUMA node(s)'),
+        caches: {
+          l1d: values.get('L1d cache') || null,
+          l1i: values.get('L1i cache') || null,
+          l2: values.get('L2 cache') || null,
+          l3: values.get('L3 cache') || null,
+        },
+        flags: values.get('Flags')?.split(/\s+/).filter(Boolean) || [],
+        numaCpuMap: rows.filter(({ field }) => /^NUMA node\d+ CPU\(s\):?$/.test(field.trim())).map(({ field, data }) => ({
+          node: field.match(/\d+/)?.[0] ?? null,
+          cpus: String(data || '').trim(),
+        })),
+      };
+    })();
+  }
+
+  return cpuInventoryPromise;
+}
+
+async function readLinuxApplications() {
+  if (process.platform !== 'linux') return [];
+
+  const processSnapshot = await readSafely(() => systemInformation.processes(), { list: [] });
+  const currentUser = os.userInfo().username;
+  const processList = processSnapshot.list || [];
+  const goSeekProcessTree = new Set([process.pid]);
+  let foundChild;
+
+  do {
+    foundChild = false;
+    for (const item of processList) {
+      if (goSeekProcessTree.has(item.parentPid) && !goSeekProcessTree.has(item.pid)) {
+        goSeekProcessTree.add(item.pid);
+        foundChild = true;
+      }
+    }
+  } while (foundChild);
+
+  const candidates = processList.filter((item) => {
+    const name = String(item.name || '').toLowerCase();
+    return item.user === currentUser &&
+      !goSeekProcessTree.has(item.pid) &&
+      item.state !== 'zombie' &&
+      name &&
+      !desktopServiceNames.has(name) &&
+      !name.startsWith('gsd-') &&
+      !['bash', 'dash', 'fish', 'sh', 'zsh'].includes(name);
+  });
+  const currentSession = new Map();
+  const applications = await Promise.all(candidates.map(async (item) => {
+    const sessionKey = `${item.pid}:${item.started || ''}`;
+    let isGraphicalApplication = applicationSessionCache.get(sessionKey);
+
+    if (isGraphicalApplication === undefined) {
+      const environment = await readSafely(() => fs.readFile(`/proc/${item.pid}/environ`), Buffer.alloc(0));
+      const entries = environment.toString().split('\0');
+      isGraphicalApplication = entries.some((entry) => /^(?:DISPLAY|WAYLAND_DISPLAY|FLATPAK_ID|SNAP_NAME|APPIMAGE)=.+$/.test(entry));
+    }
+
+    currentSession.set(sessionKey, isGraphicalApplication);
+    if (!isGraphicalApplication) return null;
+
+    return {
+      pid: item.pid,
+      name: item.name,
+      cpuPercent: Number.isFinite(item.cpu) ? item.cpu : null,
+      memoryPercent: Number.isFinite(item.mem) ? item.mem : null,
+      residentBytes: Number.isFinite(item.memRss) ? item.memRss * 1024 : null,
+      state: item.state || null,
+      started: item.started || null,
+      childProcessCount: processList.filter((child) => child.parentPid === item.pid).length,
+    };
+  }));
+
+  applicationSessionCache = currentSession;
+  return applications.filter(Boolean).sort((left, right) => (right.cpuPercent || 0) - (left.cpuPercent || 0)).slice(0, 100);
+}
+
 async function getStaticInventory() {
   if (!staticInventoryPromise) {
     staticInventoryPromise = (async () => {
@@ -91,7 +233,7 @@ async function getStaticInventory() {
 }
 
 async function getHardwareSnapshot() {
-  const [cpu, currentSpeed, currentLoad, temperature, memory, memoryLayout, graphics, system, baseboard, bios, osInfo, inventory, networkStats, battery, fanSpeeds, cpuInfo, filesystems, storageIO] = await Promise.all([
+  const [cpu, currentSpeed, currentLoad, temperature, memory, memoryLayout, graphics, system, baseboard, bios, osInfo, inventory, networkStats, battery, fanSpeeds, cpuInfo, filesystems, storageIO, bootMode, cpuInventory, applications] = await Promise.all([
     readSafely(() => systemInformation.cpu(), {}),
     readSafely(() => systemInformation.cpuCurrentSpeed(), {}),
     readSafely(() => systemInformation.currentLoad(), {}),
@@ -112,8 +254,12 @@ async function getHardwareSnapshot() {
       : Promise.resolve(''),
     readSafely(() => systemInformation.fsSize(), []),
     readSafely(() => systemInformation.fsStats(), {}),
+    readLinuxBootMode(),
+    readLinuxCpuInventory(),
+    readLinuxApplications(),
   ]);
   const microcodeRevision = cpuInfo.match(/^microcode\s*:\s*(.+)$/m)?.[1]?.trim() ?? null;
+  const hostBridges = (inventory.pci || []).filter((device) => ['0x060000', '0x060100'].includes(String(device.classCode).toLowerCase()));
 
   return {
     runtime: 'desktop',
@@ -128,7 +274,12 @@ async function getHardwareSnapshot() {
       family: cpu.family || 'Not reported',
       model: cpu.model || 'Not reported',
       stepping: cpu.stepping || 'Not reported',
+      revision: cpu.revision ?? null,
       socket: cpu.socket || 'Not reported',
+      voltage: cpu.voltage || null,
+      minimumSpeedGhz: cpu.speedMin ?? null,
+      governor: cpu.governor || null,
+      instructions: typeof cpu.flags === 'string' ? cpu.flags.trim().split(/\s+/).filter(Boolean) : [],
     },
     cpu: {
       logicalCores: cpu.cores ?? os.cpus().length,
@@ -137,6 +288,8 @@ async function getHardwareSnapshot() {
       efficiencyCores: cpu.efficiencyCores ?? null,
       architecture: `${cpu.family || 'Family n/a'} / ${cpu.model || 'Model n/a'}`,
       maxSpeedGhz: cpu.speedMax ?? null,
+      minSpeedGhz: cpu.speedMin ?? null,
+      governor: cpu.governor || null,
       current: currentSpeed.cores || [],
       averageSpeedGhz: currentSpeed.avg ?? null,
       utilizationPercent: currentLoad.currentLoad ?? null,
@@ -146,20 +299,33 @@ async function getHardwareSnapshot() {
       perCoreTemperatureC: temperature.cores || [],
       microcodeRevision,
     },
-    graphics: (graphics.controllers || []).map((controller) => pick(controller, [
-      'vendor', 'model', 'name', 'bus', 'vram', 'vramDynamic', 'driverVersion',
-      'clockCore', 'clockMemory', 'utilizationGpu', 'temperatureGpu',
-    ])),
+    cpuInventory,
+    applicationsSupported: process.platform === 'linux',
+    applications,
+    graphics: await Promise.all((graphics.controllers || []).map(async (controller) => ({
+      ...pick(controller, [
+        'vendor', 'subVendor', 'model', 'name', 'bus', 'busAddress', 'pciID', 'vram', 'vramDynamic', 'driverVersion',
+        'clockCore', 'clockMemory', 'utilizationGpu', 'temperatureGpu',
+      ]),
+      pciLink: await readLinuxPciLink(controller.busAddress),
+    }))),
     memory: {
       totalBytes: memory.total ?? null,
       availableBytes: memory.available ?? null,
       modules: (memoryLayout || []).map((module) => pick(module, [
-        'size', 'type', 'clockSpeed', 'formFactor', 'manufacturer', 'partNum', 'ecc',
+        'size', 'type', 'clockSpeed', 'formFactor', 'bank', 'manufacturer', 'partNum', 'ecc',
+        'voltageConfigured', 'voltageMin', 'voltageMax', 'serialNum',
       ])),
     },
     system: pick(system, ['manufacturer', 'model', 'version', 'sku', 'virtual', 'virtualHost']),
-    mainboard: pick(baseboard, ['manufacturer', 'model', 'version', 'memMax', 'memSlots']),
-    bios: pick(bios, ['vendor', 'version', 'releaseDate', 'revision', 'language']),
+    mainboard: {
+      ...pick(baseboard, ['manufacturer', 'model', 'version', 'memMax', 'memSlots']),
+      hostBridges,
+    },
+    bios: {
+      ...pick(bios, ['vendor', 'version', 'releaseDate', 'revision', 'language']),
+      bootMode,
+    },
     display: (graphics.displays || []).map((display) => pick(display, [
       'model', 'main', 'builtin', 'connection', 'resolutionX', 'resolutionY', 'currentRefreshRate', 'pixelDepth',
     ])),

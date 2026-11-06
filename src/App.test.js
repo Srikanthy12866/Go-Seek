@@ -3,6 +3,7 @@ import App from './App';
 
 afterEach(() => {
   delete window.deviceHardware;
+  window.location.hash = '';
 });
 
 test('renders the device report and browser access note', async () => {
@@ -18,14 +19,20 @@ test('renders desktop Linux inventory without host identifiers', async () => {
       runtime: 'desktop',
       capturedAt: Date.now(),
       operatingSystem: 'Ubuntu Linux',
-      soc: { name: 'Test CPU', manufacturer: 'Test Vendor', family: '6', model: '1', processNode: 'Not reported' },
+      soc: {
+        name: 'Test CPU', manufacturer: 'Test Vendor', family: '6', model: '1', stepping: '3',
+        revision: 'A1', socket: 'AM4', voltage: '1.20', instructions: ['sse', 'sse2', 'avx2'],
+        processNode: 'Not reported',
+      },
       cpu: {
         logicalCores: 8,
         physicalCores: 4,
         performanceCores: null,
         efficiencyCores: null,
         architecture: 'Family 6 / Model 1',
+        minSpeedGhz: 0.8,
         maxSpeedGhz: 4,
+        governor: 'schedutil',
         current: [1.5, 3.25],
         averageSpeedGhz: 2.35,
         utilizationPercent: 61,
@@ -35,11 +42,33 @@ test('renders desktop Linux inventory without host identifiers', async () => {
         perCoreTemperatureC: [],
         microcodeRevision: '0x1234',
       },
-      graphics: [{ vendor: 'Test GPU vendor', model: 'Test GPU', clockCore: 1200, clockMemory: 7000, utilizationGpu: 53, temperatureGpu: 61 }],
-      memory: { totalBytes: 16 * 1024 ** 3, availableBytes: 8 * 1024 ** 3, modules: [] },
+      cpuInventory: {
+        architecture: 'x86_64',
+        operationModes: '32-bit, 64-bit',
+        byteOrder: 'Little Endian',
+        vendorId: 'GenuineIntel',
+        bogoMips: 6585.26,
+        virtualization: 'VT-x',
+        hypervisorVendor: null,
+        threadsPerCore: 2,
+        coresPerSocket: 2,
+        sockets: 1,
+        numaNodes: 1,
+        caches: { l1d: '64 KiB (2 instances)', l1i: '64 KiB (2 instances)', l2: '512 KiB (2 instances)', l3: '3 MiB (1 instance)' },
+        flags: ['sse', 'sse2', 'avx2'],
+        numaCpuMap: [{ node: '0', cpus: '0-3' }],
+      },
+      applicationsSupported: true,
+      applications: [{ pid: 4321, name: 'Firefox', cpuPercent: 26.3, memoryPercent: 2.5, residentBytes: 512 * 1024 ** 2, state: 'running', started: '2026-11-06 09:00:00', childProcessCount: 4 }],
+      graphics: [{ vendor: 'Test GPU vendor', subVendor: 'Test GPU board', model: 'Test GPU', bus: 'PCIe', busAddress: '0000:01:00.0', pciID: '1234:abcd', pciLink: { currentSpeed: '16.0 GT/s PCIe', currentWidth: '8', maxSpeed: '16.0 GT/s PCIe', maxWidth: '16' }, vram: 8192, vramDynamic: true, clockCore: 1200, clockMemory: 7000, utilizationGpu: 53, temperatureGpu: 61 }],
+      memory: {
+        totalBytes: 16 * 1024 ** 3,
+        availableBytes: 8 * 1024 ** 3,
+        modules: [{ size: 8 * 1024 ** 3, type: 'DDR4', clockSpeed: 3200, formFactor: 'DIMM', bank: 'BANK 0', manufacturer: 'Test Vendor', partNum: 'TEST-8G', serialNum: 'SPD-SERIAL-1234', ecc: 'No', voltageConfigured: 1.2, voltageMin: 1.1, voltageMax: 1.35 }],
+      },
       system: {},
-      mainboard: {},
-      bios: {},
+      mainboard: { manufacturer: 'Test Board vendor', model: 'Test Board', memMax: 32 * 1024 ** 3, memSlots: 2, hostBridges: [{ classCode: '0x060000', vendorId: '0x8086', deviceId: '0x1234' }] },
+      bios: { bootMode: 'UEFI' },
       display: [],
       storage: {
         disks: [{ name: 'Test drive', vendor: 'Test Vendor', type: 'NVMe', size: 512 * 1024 ** 3, interfaceType: 'PCIe', firmwareRevision: '1.0', smartStatus: 'Ok' }],
@@ -78,26 +107,50 @@ test('renders desktop Linux inventory without host identifiers', async () => {
   expect(screen.queryByRole('heading', { name: 'USB devices' })).not.toBeInTheDocument();
   expect(await screen.findByRole('img', { name: 'CPU average frequency trend over the last minute' })).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole('button', { name: 'Memory' }));
-  expect(screen.getByRole('heading', { name: 'Memory modules' })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Board & BIOS' }));
+  fireEvent.click(screen.getByRole('link', { name: 'Applications' }));
+  expect(window.location.hash).toBe('#/applications');
+  expect(screen.getByRole('heading', { name: 'Current user applications' })).toBeInTheDocument();
+  expect(screen.getByText('Firefox')).toBeInTheDocument();
+  expect(screen.getByText(/PID 4321/)).toBeInTheDocument();
+  expect(screen.getByText('26.3%')).toBeInTheDocument();
+  expect(screen.getByText(/2\.5% · 512\.00 MB/)).toBeInTheDocument();
+  expect(screen.queryByText('systemd')).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('link', { name: 'Memory' }));
+  expect(screen.getByRole('heading', { name: 'SPD modules' })).toBeInTheDocument();
+  expect(screen.getByText(/1 · BANK 0 · No/)).toBeInTheDocument();
+  expect(screen.getByText(/1\.20 V · 1\.10 V · 1\.35 V/)).toBeInTheDocument();
+  expect(screen.getByText('SPD-SERIAL-1234')).toBeInTheDocument();
+  expect(screen.getByText(/Module timings/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('link', { name: 'Board & BIOS' }));
   expect(screen.getByRole('heading', { name: 'System & mainboard' })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Display' }));
+  expect(screen.getByText(/0x8086:0x1234/)).toBeInTheDocument();
+  expect(screen.getByText(/Maximum memory/)).toBeInTheDocument();
+  expect(screen.getByText('UEFI')).toBeInTheDocument();
+  expect(screen.getByText(/16\.0 GT\/s PCIe · x8/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('link', { name: 'Display' }));
   expect(screen.getByRole('heading', { name: 'Displays' })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Connectivity' }));
+  fireEvent.click(screen.getByRole('link', { name: 'Connectivity' }));
   expect(screen.getByRole('heading', { name: 'Network links' })).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole('button', { name: 'Compute & graphics' }));
+  fireEvent.click(screen.getByRole('link', { name: 'Compute & graphics' }));
   expect(screen.getByRole('meter', { name: 'Core 1 frequency' })).toHaveAttribute('aria-valuenow', '3.25');
   expect(screen.getByRole('meter', { name: 'Graphics processor 1 utilization' })).toHaveAttribute('aria-valuenow', '53');
+  expect(screen.getByText(/AM4/)).toBeInTheDocument();
+  expect(screen.getByText(/x86_64 · 32-bit, 64-bit/)).toBeInTheDocument();
+  expect(screen.getByText(/6585\.26/)).toBeInTheDocument();
+  expect(screen.getAllByText(/Node 0: 0-3/)).toHaveLength(2);
+  expect(screen.getByText(/sse, sse2, avx2/)).toBeInTheDocument();
+  expect(screen.getByText(/Test GPU board/)).toBeInTheDocument();
+  expect(screen.getByText(/1234:abcd/)).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole('button', { name: 'Storage' }));
+  fireEvent.click(screen.getByRole('link', { name: 'Storage' }));
   expect(await screen.findByText(/Test Vendor Test drive/)).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Devices & power' }));
+  fireEvent.click(screen.getByRole('link', { name: 'Devices & power' }));
   expect(screen.getAllByText(/0x1234/).length).toBeGreaterThan(0);
   expect(screen.queryByText(/192\.0\.2\.10|AA:BB:CC:DD:EE:FF|private-usb-serial/)).not.toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole('button', { name: 'Storage' }));
+  fireEvent.click(screen.getByRole('link', { name: 'Storage' }));
   expect(screen.getByRole('heading', { name: 'Filesystem capacity' })).toBeInTheDocument();
   expect(screen.getByText(/25\.0%/)).toBeInTheDocument();
 
@@ -107,7 +160,7 @@ test('renders desktop Linux inventory without host identifiers', async () => {
     capturedAt: initialSnapshot.capturedAt + 1000,
     cpu: { ...initialSnapshot.cpu, averageSpeedGhz: 3.1 },
   });
-  fireEvent.click(screen.getByRole('button', { name: 'Overview' }));
+  fireEvent.click(screen.getByRole('link', { name: 'Overview' }));
   fireEvent.click(screen.getByRole('button', { name: /refresh/i }));
   expect(await screen.findAllByText('3.10 GHz')).toHaveLength(1);
   await waitFor(() => expect(container.querySelector('.frequency-trend-line')).toHaveAttribute('points', expect.stringContaining(' ')));

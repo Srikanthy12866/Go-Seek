@@ -34,11 +34,17 @@ React Native UI (mobile/App.js)
 
 The desktop renderer has `nodeIntegration: false`, `contextIsolation: true` and a sandboxed preload. Do not import Node modules or `systeminformation` from React. Add narrowly scoped IPC methods in the Electron preload/main process if the UI needs another host capability.
 
+Desktop and browser menu pages use React Router `HashRouter` paths (for example `#/compute`). Hash routing works with both the CRA development URL and Electron's packaged `loadFile` URL.
+
 ## Project Map
 
-- `src/App.js`: React UI, browser fallback, report sections, refresh/export, and one-second polling when the Electron bridge exists.
+- `src/App.js`: shared application shell, sidebar routes, report actions, and global status.
+- `src/pages/`: one routed page per report menu.
+- `src/context/HardwareContext.js`: shared snapshot polling and CPU frequency history.
+- `src/lib/`: browser fallback collection and shared value formatting.
+- `src/components/`: reusable hardware panels and compute dashboard.
 - `src/App.css` and `src/index.css`: web and Electron renderer styling.
-- `src/App.test.js`: React Testing Library smoke test for browser rendering.
+- `src/App.test.js`: React Testing Library coverage for browser fallback, hash navigation, and hardware page rendering.
 - `electron/main.cjs`: Electron lifecycle, hardware snapshot collection, IPC handler, window security, and development/packaged loading.
 - `electron/preload.cjs`: exposes the read-only `window.deviceHardware.getSnapshot()` bridge.
 - `mobile/App.js`: separate React Native SOP interface and polling loop.
@@ -98,7 +104,11 @@ For Android-only JavaScript bundling, use `npx expo export --platform android`. 
 
 The desktop collector calls `systeminformation` for CPU identity, current per-core speeds, cache sizes, memory and memory-module layout, graphics controllers/displays, system, baseboard, BIOS and OS data. The values are queried on the local host. Drivers, firmware and OS permissions determine which fields are populated. Missing or unsupported values should remain unavailable; do not infer values from a CPU marketing name or another device property.
 
-On Linux, the desktop report also collects disk and filesystem capacity, storage firmware/health fields when reported, network link state and aggregate traffic rates, USB device descriptions, battery status, and best-effort PCI, CPU microcode, and fan-speed details from readable `/sys` and `/proc` interfaces. Stable disk, network-interface, USB, and PCI inventory is cached while the app runs; filesystem capacity and live CPU, temperature, battery, and traffic readings refresh every second. Overview is limited to CPU frequency/utilization, memory usage, network receive/transmit, and aggregate storage read/write dashboards. The Compute tab shows per-core CPU frequency/load meters, available GPU clocks/utilization/temperature, and a one-minute average CPU frequency trend held in memory for the current app session; other inventory details remain in their corresponding tabs. The collector does not run privileged commands such as `sudo dmidecode` or invoke `sensors`; BIOS, sensor, GPU, and firmware fields that require elevated permissions or unsupported drivers may be unavailable. IP/MAC addresses, machine hostname, disk identifiers, and device serial numbers are excluded from the desktop snapshot and report export by default.
+On Linux, the desktop report also collects disk and filesystem capacity, storage firmware/health fields when reported, network link state and aggregate traffic rates, USB device descriptions, battery status, and best-effort PCI, CPU microcode, and fan-speed details from readable `/sys` and `/proc` interfaces. It reads a cached `lscpu --json` inventory when that fixed system utility is available, adding CPU modes, topology, BogoMIPS, NUMA mapping, and cache summaries. Stable disk, network-interface, USB, PCI, and CPU inventory is cached while the app runs; filesystem capacity and live CPU, temperature, battery, and traffic readings refresh every second. Overview is limited to CPU frequency/utilization, memory usage, network receive/transmit, and aggregate storage read/write dashboards. The Compute tab shows per-core CPU frequency/load meters, available GPU clocks/utilization/temperature, and a one-minute average CPU frequency trend held in memory for the current app session; other inventory details remain in their corresponding tabs. The collector does not run privileged commands such as `sudo dmidecode` or invoke `sensors`; BIOS, sensor, GPU, and firmware fields that require elevated permissions or unsupported drivers may be unavailable. IP/MAC addresses, machine hostname, disk identifiers, and system-device serial numbers are excluded from the desktop snapshot; SPD module serials are included in the Memory tab and exported report.
+
+The Applications tab samples processes owned by the logged-in user that have graphical-session markers, excluding Go Seek and common desktop/session services. It reports process CPU percentage and resident memory on the normal one-second refresh. It does not expose process command lines or executable paths; classification is best-effort and is currently supported on Linux desktop.
+
+Compared with [CPU-Z](https://www.cpuid.com/softwares/cpu-z.html), Go Seek shows the corresponding CPU, cache, board/BIOS, SPD, graphics, and live-clock fields Linux exposes, including CPU revision/voltage/instructions/governor, DIMM bank/ECC/serial/voltage, UEFI mode, PCI host-bridge IDs, GPU PCI identity, and PCIe link speed/width. Standard Linux interfaces used here do not reliably expose CPU codename/process technology/TDP, chipset marketing name, bus clock/multiplier, DRAM timings/channel mode, module ranks/manufacture week, or GPU technology/memory bus width. These are identified as unavailable rather than inferred. SPD serials identify memory modules and are included in JSON exports.
 
 The Android collector uses public Android build properties, `ActivityManager` memory data, EGL/OpenGL renderer data, and best-effort kernel paths under `/sys`. OEM kernels and app permissions vary. CPU/GPU frequency, hybrid-core topology, caches and GPU names can be unavailable. Stock Android does not expose semiconductor process node or RAM type/timings through a standard app API. Android devices do not have a PC-style BIOS.
 

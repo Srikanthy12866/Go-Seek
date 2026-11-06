@@ -12,6 +12,7 @@
     "@testing-library/user-event": "^13.5.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "react-router-dom": "^6.30.6",
     "react-scripts": "5.0.1",
     "systeminformation": "^5.33.15",
     "web-vitals": "^2.1.4"
@@ -63,7 +64,10 @@
       "package.json"
     ],
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "icon": "mobile/assets/icon.png",
       "category": "Utility",
       "maintainer": "Go Seek maintainers",
@@ -71,11 +75,15 @@
       "artifactName": "go-seek-${version}-${arch}.${ext}"
     },
     "win": {
-      "target": ["nsis"],
+      "target": [
+        "nsis"
+      ],
       "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "artifactName": "${productName}-${version}-${arch}.${ext}"
     }
   }
