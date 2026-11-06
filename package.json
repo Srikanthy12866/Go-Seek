@@ -1,8 +1,10 @@
 {
-  "name": "shr",
+  "name": "go-seek",
   "version": "0.1.0",
   "private": true,
+  "homepage": ".",
   "main": "electron/main.cjs",
+  "desktopName": "Go Seek",
   "dependencies": {
     "@testing-library/dom": "^10.4.2",
     "@testing-library/jest-dom": "^6.9.1",
@@ -49,8 +51,11 @@
     "wait-on": "^9.5.1"
   },
   "build": {
-    "appId": "systems.fieldnote.device-report",
-    "productName": "Fieldnote Device Report",
+    "appId": "com.goseek.app",
+    "productName": "Go Seek",
+    "extraMetadata": {
+      "main": "electron/main.cjs"
+    },
     "files": [
       "build/**/*",
       "electron/**/*",
@@ -59,8 +64,11 @@
     ],
     "linux": {
       "target": ["AppImage", "deb"],
+      "icon": "mobile/assets/icon.png",
       "category": "Utility",
-      "artifactName": "${productName}-${version}-${arch}.${ext}"
+      "maintainer": "Go Seek maintainers",
+      "syncDesktopName": true,
+      "artifactName": "go-seek-${version}-${arch}.${ext}"
     },
     "win": {
       "target": ["nsis"],

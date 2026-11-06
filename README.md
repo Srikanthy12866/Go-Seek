@@ -1,6 +1,6 @@
-# Fieldnote Device Report
+# Go Seek Device Report
 
-Fieldnote reads hardware from the same device that runs the app. It has a React interface with separate host collectors for desktop and Android. A browser-only session can show only browser-approved estimates; it is not the full hardware application.
+Go Seek reads hardware from the same device that runs the app. It has a React interface with separate host collectors for desktop and Android. A browser-only session can show only browser-approved estimates; it is not the full hardware application.
 
 ## Quick Start
 
@@ -73,6 +73,8 @@ npm run desktop:build
 
 Configured outputs are Windows NSIS installer, macOS DMG, and Linux AppImage/DEB. Linux ARM64 packaging has a separate script:
 
+On Ubuntu, install the generated `.deb` package to register Go Seek in the applications menu. Running the AppImage directly does not necessarily add a menu entry; use an AppImage integration tool if you want it listed there. Linux packages use the app icon at `mobile/assets/icon.png`.
+
 ```powershell
 npm run desktop:linux-arm64
 ```
@@ -95,6 +97,8 @@ For Android-only JavaScript bundling, use `npx expo export --platform android`. 
 ## Hardware Data and Accuracy
 
 The desktop collector calls `systeminformation` for CPU identity, current per-core speeds, cache sizes, memory and memory-module layout, graphics controllers/displays, system, baseboard, BIOS and OS data. The values are queried on the local host. Drivers, firmware and OS permissions determine which fields are populated. Missing or unsupported values should remain unavailable; do not infer values from a CPU marketing name or another device property.
+
+On Linux, the desktop report also collects disk and filesystem capacity, storage firmware/health fields when reported, network link state and aggregate traffic rates, USB device descriptions, battery status, and best-effort PCI, CPU microcode, and fan-speed details from readable `/sys` and `/proc` interfaces. Stable disk, network-interface, USB, and PCI inventory is cached while the app runs; filesystem capacity and live CPU, temperature, battery, and traffic readings refresh every second. Overview is limited to CPU frequency/utilization, memory usage, network receive/transmit, and aggregate storage read/write dashboards. The Compute tab shows per-core CPU frequency/load meters, available GPU clocks/utilization/temperature, and a one-minute average CPU frequency trend held in memory for the current app session; other inventory details remain in their corresponding tabs. The collector does not run privileged commands such as `sudo dmidecode` or invoke `sensors`; BIOS, sensor, GPU, and firmware fields that require elevated permissions or unsupported drivers may be unavailable. IP/MAC addresses, machine hostname, disk identifiers, and device serial numbers are excluded from the desktop snapshot and report export by default.
 
 The Android collector uses public Android build properties, `ActivityManager` memory data, EGL/OpenGL renderer data, and best-effort kernel paths under `/sys`. OEM kernels and app permissions vary. CPU/GPU frequency, hybrid-core topology, caches and GPU names can be unavailable. Stock Android does not expose semiconductor process node or RAM type/timings through a standard app API. Android devices do not have a PC-style BIOS.
 

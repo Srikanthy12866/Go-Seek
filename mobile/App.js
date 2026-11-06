@@ -107,7 +107,7 @@ function App() {
         <View style={styles.topBar}>
           <View style={styles.brand}>
             <View style={styles.brandMark}><View style={styles.brandSquare} /><View style={styles.brandSquare} /><View style={styles.brandSquare} /><View style={styles.brandSquare} /></View>
-            <View><Text style={styles.brandName}>FIELDNOTE</Text><Text style={styles.brandCaption}>DEVICE SYSTEMS</Text></View>
+            <View><Text style={styles.brandName}>GO SEEK</Text><Text style={styles.brandCaption}>DEVICE SYSTEMS</Text></View>
           </View>
           <Pressable onPress={() => setLiveEnabled((enabled) => !enabled)} style={styles.statusPill} accessibilityRole="switch" accessibilityState={{ checked: liveEnabled }}>
             <View style={[styles.statusDot, !liveEnabled && styles.statusDotPaused]} />
@@ -230,7 +230,7 @@ function App() {
           )}
 
           <View style={styles.footer}>
-            <Text style={styles.footerText}>FIELDNOTE SYSTEMS  /  DEVICE REPORT</Text>
+            <Text style={styles.footerText}>GO SEEK SYSTEMS  /  DEVICE REPORT</Text>
             <Text style={styles.footerText}>ON-DEVICE READOUT · NO UPLOAD</Text>
           </View>
         </ScrollView>

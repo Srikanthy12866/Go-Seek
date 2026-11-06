@@ -1,4 +1,4 @@
-# Fieldnote Device Report
+# Go Seek Device Report
 
 This is the Android native hardware collector for the device SOP. It polls once per second while live mode is enabled.
 
