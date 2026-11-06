@@ -24,6 +24,14 @@ export const formatVoltage = (value) => {
 
 export const formatCapacity = (value) => Number.isFinite(value) ? formatBytes(value) : typeof value === 'string' && value.trim() ? value : 'Not reported';
 
+export const unavailableReading = 'Not exposed by standard Linux hardware APIs';
+
+export const formatOptional = (value, fallback = unavailableReading) => {
+  if (value == null || value === '') return fallback;
+  if (Array.isArray(value)) return value.length ? value.join(' · ') : fallback;
+  return String(value);
+};
+
 export const sumRates = (samples, key) => {
   const rates = samples.map(sample => sample[key]).filter(Number.isFinite);
   return rates.length ? rates.reduce((total, rate) => total + rate, 0) : null;

@@ -9,6 +9,7 @@ const systemInformation = require('systeminformation');
 const execFileAsync = promisify(execFile);
 let staticInventoryPromise;
 let cpuInventoryPromise;
+let cacheTopologyPromise;
 let applicationSessionCache = new Map();
 
 const desktopServiceNames = new Set([
@@ -69,10 +70,48 @@ async function readLinuxFanSpeeds() {
   return readings.flat().filter(Boolean).slice(0, 32);
 }
 
-async function readLinuxPciLink(busAddress) {
-  if (process.platform !== 'linux' || !/^[\da-f]{4}:[\da-f]{2}:[\da-f]{2}\.[0-7]$/i.test(busAddress || '')) return null;
+function pciSysfsAddress(busAddress) {
+  const address = String(busAddress || '').trim().toLowerCase();
+  if (/^[\da-f]{4}:[\da-f]{2}:[\da-f]{2}\.[0-7]$/.test(address)) return address;
+  if (/^[\da-f]{2}:[\da-f]{2}\.[0-7]$/.test(address)) return `0000:${address}`;
+  return null;
+}
 
-  const directory = path.join('/sys/bus/pci/devices', busAddress);
+function decodeDisplayedCpuId(family, model) {
+  const familyNumber = Number.parseInt(family, 10);
+  const modelNumber = Number.parseInt(model, 10);
+  if (!Number.isInteger(familyNumber) || familyNumber < 0 || !Number.isInteger(modelNumber) || modelNumber < 0) {
+    return { extendedFamily: null, extendedModel: null, baseModel: null };
+  }
+
+  const usesExtendedModel = familyNumber === 6 || familyNumber >= 15;
+  return {
+    extendedFamily: familyNumber > 15 ? familyNumber - 15 : 0,
+    extendedModel: usesExtendedModel ? modelNumber >> 4 : 0,
+    baseModel: usesExtendedModel ? modelNumber & 0xF : modelNumber,
+  };
+}
+
+function parseKernelCacheSize(value) {
+  const match = String(value || '').trim().match(/^(\d+(?:\.\d+)?)\s*([KMG])?B?$/i);
+  if (!match) return null;
+  const amount = Number(match[1]);
+  const unit = (match[2] || '').toUpperCase();
+  const multiplier = unit === 'G' ? 1024 ** 3 : unit === 'M' ? 1024 ** 2 : unit === 'K' ? 1024 : 1;
+  return Number.isFinite(amount) ? Math.round(amount * multiplier) : null;
+}
+
+function parsePpDpmCurrentMhz(text) {
+  const current = String(text || '').split('\n').find((line) => line.includes('*'));
+  const mhz = Number(current?.match(/(\d+(?:\.\d+)?)\s*Mhz/i)?.[1]);
+  return Number.isFinite(mhz) && mhz > 0 ? mhz : null;
+}
+
+async function readLinuxPciLink(busAddress) {
+  const address = pciSysfsAddress(busAddress);
+  if (process.platform !== 'linux' || !address) return null;
+
+  const directory = path.join('/sys/bus/pci/devices', address);
   const [currentSpeed, currentWidth, maxSpeed, maxWidth] = await Promise.all([
     'current_link_speed', 'current_link_width', 'max_link_speed', 'max_link_width',
   ].map((file) => readSafely(() => fs.readFile(path.join(directory, file), 'utf8').then((value) => value.trim()), null)));
@@ -137,6 +176,67 @@ async function readLinuxCpuInventory() {
   }
 
   return cpuInventoryPromise;
+}
+
+async function readLinuxCacheTopology() {
+  if (process.platform !== 'linux') return [];
+  if (!cacheTopologyPromise) {
+    cacheTopologyPromise = (async () => {
+      const cpuNames = await readSafely(() => fs.readdir('/sys/devices/system/cpu'), []);
+      const instances = new Map();
+
+      for (const cpuName of cpuNames.filter((name) => /^cpu\d+$/.test(name))) {
+        const cacheDirectory = path.join('/sys/devices/system/cpu', cpuName, 'cache');
+        const indexes = await readSafely(() => fs.readdir(cacheDirectory), []);
+        for (const index of indexes.filter((name) => /^index\d+$/.test(name))) {
+          const directory = path.join(cacheDirectory, index);
+          const readText = (file) => readSafely(() => fs.readFile(path.join(directory, file), 'utf8').then((value) => value.trim()), null);
+          const [level, type, size, ways, lineSize, sets, sharedCpuList] = await Promise.all([
+            readText('level'), readText('type'), readText('size'), readText('ways_of_associativity'),
+            readText('coherency_line_size'), readText('number_of_sets'), readText('shared_cpu_list'),
+          ]);
+          const key = `${level}|${type}|${sharedCpuList}`;
+          if (!level || !type || instances.has(key)) continue;
+          instances.set(key, {
+            level: Number(level),
+            type,
+            sizeBytes: parseKernelCacheSize(size),
+            ways: Number(ways) || null,
+            lineSizeBytes: Number(lineSize) || null,
+            sets: Number(sets) || null,
+            sharedCpuList: sharedCpuList || null,
+          });
+        }
+      }
+
+      return [...instances.values()].sort((left, right) => left.level - right.level || String(left.type).localeCompare(String(right.type)) || String(left.sharedCpuList).localeCompare(String(right.sharedCpuList)));
+    })();
+  }
+
+  return cacheTopologyPromise;
+}
+
+async function readLinuxGpuClocks() {
+  if (process.platform !== 'linux') return new Map();
+
+  const cards = (await readSafely(() => fs.readdir('/sys/class/drm'), [])).filter((name) => /^card\d+$/.test(name));
+  const clocks = new Map();
+  await Promise.all(cards.map(async (card) => {
+    const devicePath = path.join('/sys/class/drm', card, 'device');
+    const uevent = await readSafely(() => fs.readFile(path.join(devicePath, 'uevent'), 'utf8'), '');
+    const slot = uevent.match(/^PCI_SLOT_NAME=(.+)$/m)?.[1]?.trim();
+    let core = await readSafely(() => fs.readFile(path.join('/sys/class/drm', card, 'gt/gt0/rps_cur_freq_mhz'), 'utf8').then((value) => Number(value.trim())), null);
+    if (!Number.isFinite(core) || core <= 0) core = parsePpDpmCurrentMhz(await readSafely(() => fs.readFile(path.join(devicePath, 'pp_dpm_sclk'), 'utf8'), ''));
+    const memory = parsePpDpmCurrentMhz(await readSafely(() => fs.readFile(path.join(devicePath, 'pp_dpm_mclk'), 'utf8'), ''));
+    if ((!Number.isFinite(core) || core <= 0) && !memory) return;
+
+    const reading = { core: Number.isFinite(core) && core > 0 ? core : null, memory };
+    const address = pciSysfsAddress(slot);
+    if (!address) return;
+    clocks.set(address, reading);
+    clocks.set(address.replace(/^[\da-f]{4}:/, ''), reading);
+  }));
+  return clocks;
 }
 
 async function readLinuxApplications() {
@@ -233,7 +333,7 @@ async function getStaticInventory() {
 }
 
 async function getHardwareSnapshot() {
-  const [cpu, currentSpeed, currentLoad, temperature, memory, memoryLayout, graphics, system, baseboard, bios, osInfo, inventory, networkStats, battery, fanSpeeds, cpuInfo, filesystems, storageIO, bootMode, cpuInventory, applications] = await Promise.all([
+  const [cpu, currentSpeed, currentLoad, temperature, memory, memoryLayout, graphics, system, baseboard, bios, osInfo, inventory, networkStats, battery, fanSpeeds, cpuInfo, filesystems, storageIO, bootMode, cpuInventory, cacheTopology, gpuClocks, applications] = await Promise.all([
     readSafely(() => systemInformation.cpu(), {}),
     readSafely(() => systemInformation.cpuCurrentSpeed(), {}),
     readSafely(() => systemInformation.currentLoad(), {}),
@@ -256,9 +356,12 @@ async function getHardwareSnapshot() {
     readSafely(() => systemInformation.fsStats(), {}),
     readLinuxBootMode(),
     readLinuxCpuInventory(),
+    readLinuxCacheTopology(),
+    readLinuxGpuClocks(),
     readLinuxApplications(),
   ]);
   const microcodeRevision = cpuInfo.match(/^microcode\s*:\s*(.+)$/m)?.[1]?.trim() ?? null;
+  const cpuId = decodeDisplayedCpuId(cpu.family, cpu.model);
   const hostBridges = (inventory.pci || []).filter((device) => ['0x060000', '0x060100'].includes(String(device.classCode).toLowerCase()));
 
   return {
@@ -269,14 +372,22 @@ async function getHardwareSnapshot() {
     architecture: os.arch(),
     soc: {
       name: cpu.brand || 'Not reported by OS',
+      codeName: null,
       manufacturer: cpu.manufacturer || 'Not reported',
-      processNode: 'Not exposed by standard host APIs',
+      processNode: null,
+      maxTdpWatts: null,
       family: cpu.family || 'Not reported',
       model: cpu.model || 'Not reported',
       stepping: cpu.stepping || 'Not reported',
+      extendedFamily: cpuId.extendedFamily,
+      extendedModel: cpuId.extendedModel,
+      baseModel: cpuId.baseModel,
       revision: cpu.revision ?? null,
       socket: cpu.socket || 'Not reported',
       voltage: cpu.voltage || null,
+      multiplier: null,
+      busSpeedMhz: null,
+      platformLink: null,
       minimumSpeedGhz: cpu.speedMin ?? null,
       governor: cpu.governor || null,
       instructions: typeof cpu.flags === 'string' ? cpu.flags.trim().split(/\s+/).filter(Boolean) : [],
@@ -295,31 +406,74 @@ async function getHardwareSnapshot() {
       utilizationPercent: currentLoad.currentLoad ?? null,
       perCoreUtilizationPercent: (currentLoad.cpus || []).map((core) => core.load ?? null),
       caches: cpu.cache || {},
+      cacheInstances: cacheTopology,
       temperatureC: temperature.main ?? null,
       perCoreTemperatureC: temperature.cores || [],
       microcodeRevision,
     },
     cpuInventory,
+    bench: {
+      singleThread: null,
+      multiThread: null,
+      referenceComparison: null,
+      stressTest: null,
+    },
     applicationsSupported: process.platform === 'linux',
     applications,
-    graphics: await Promise.all((graphics.controllers || []).map(async (controller) => ({
-      ...pick(controller, [
-        'vendor', 'subVendor', 'model', 'name', 'bus', 'busAddress', 'pciID', 'vram', 'vramDynamic', 'driverVersion',
-        'clockCore', 'clockMemory', 'utilizationGpu', 'temperatureGpu',
-      ]),
-      pciLink: await readLinuxPciLink(controller.busAddress),
-    }))),
+    graphics: await Promise.all((graphics.controllers || []).map(async (controller) => {
+      const address = pciSysfsAddress(controller.busAddress);
+      const clocks = gpuClocks.get(address) || gpuClocks.get(String(controller.busAddress || '').trim().toLowerCase()) || {};
+      return {
+        ...pick(controller, [
+          'vendor', 'subVendor', 'model', 'name', 'bus', 'busAddress', 'pciID', 'vram', 'vramDynamic', 'driverVersion',
+          'utilizationGpu', 'temperatureGpu',
+        ]),
+        clockCore: controller.clockCore || clocks.core || null,
+        clockMemory: controller.clockMemory || clocks.memory || null,
+        codeName: null,
+        technology: null,
+        dieSize: null,
+        releaseDate: null,
+        transistorCount: null,
+        shaders: null,
+        tmus: null,
+        rops: null,
+        memoryType: null,
+        memoryBusWidthBits: null,
+        shaderClockMhz: null,
+        biosVersion: null,
+        pciLink: await readLinuxPciLink(controller.busAddress),
+      };
+    })),
     memory: {
       totalBytes: memory.total ?? null,
       availableBytes: memory.available ?? null,
-      modules: (memoryLayout || []).map((module) => pick(module, [
-        'size', 'type', 'clockSpeed', 'formFactor', 'bank', 'manufacturer', 'partNum', 'ecc',
-        'voltageConfigured', 'voltageMin', 'voltageMax', 'serialNum',
-      ])),
+      channelMode: null,
+      dramFrequencyMhz: null,
+      nbFrequencyMhz: null,
+      fsbDram: null,
+      uncoreFrequencyMhz: null,
+      timings: { cl: null, trcd: null, trp: null, tras: null, trc: null, commandRate: null },
+      modules: (memoryLayout || []).map((module) => ({
+        ...pick(module, [
+          'size', 'type', 'clockSpeed', 'formFactor', 'bank', 'manufacturer', 'partNum', 'ecc',
+          'voltageConfigured', 'voltageMin', 'voltageMax', 'serialNum',
+        ]),
+        maxBandwidth: null,
+        ranks: null,
+        manufactureWeek: null,
+        manufactureYear: null,
+        dramManufacturer: null,
+        jedecTimings: null,
+        xmpProfiles: null,
+      })),
     },
     system: pick(system, ['manufacturer', 'model', 'version', 'sku', 'virtual', 'virtualHost']),
     mainboard: {
       ...pick(baseboard, ['manufacturer', 'model', 'version', 'memMax', 'memSlots']),
+      chipset: null,
+      southbridge: null,
+      lpcio: null,
       hostBridges,
     },
     bios: {

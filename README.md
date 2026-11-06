@@ -38,10 +38,11 @@ Desktop and browser menu pages use React Router `HashRouter` paths (for example 
 
 ## Project Map
 
-- `src/App.js`: shared application shell, sidebar routes, report actions, and global status.
+- `src/App.js`: shared application shell, sidebar routes, parameter search, report actions, and global status.
 - `src/pages/`: one routed page per report menu.
 - `src/context/HardwareContext.js`: shared snapshot polling and CPU frequency history.
 - `src/lib/`: browser fallback collection and shared value formatting.
+- `src/lib/searchParameters.js`: snapshot parameter search and route mapping.
 - `src/components/`: reusable hardware panels and compute dashboard.
 - `src/App.css` and `src/index.css`: web and Electron renderer styling.
 - `src/App.test.js`: React Testing Library coverage for browser fallback, hash navigation, and hardware page rendering.
@@ -108,7 +109,7 @@ On Linux, the desktop report also collects disk and filesystem capacity, storage
 
 The Applications tab samples processes owned by the logged-in user that have graphical-session markers, excluding Go Seek and common desktop/session services. It reports process CPU percentage and resident memory on the normal one-second refresh. It does not expose process command lines or executable paths; classification is best-effort and is currently supported on Linux desktop.
 
-Compared with [CPU-Z](https://www.cpuid.com/softwares/cpu-z.html), Go Seek shows the corresponding CPU, cache, board/BIOS, SPD, graphics, and live-clock fields Linux exposes, including CPU revision/voltage/instructions/governor, DIMM bank/ECC/serial/voltage, UEFI mode, PCI host-bridge IDs, GPU PCI identity, and PCIe link speed/width. Standard Linux interfaces used here do not reliably expose CPU codename/process technology/TDP, chipset marketing name, bus clock/multiplier, DRAM timings/channel mode, module ranks/manufacture week, or GPU technology/memory bus width. These are identified as unavailable rather than inferred. SPD serials identify memory modules and are included in JSON exports.
+Compared with [CPU-Z](https://www.cpuid.com/softwares/cpu-z.html), Go Seek shows the corresponding CPU, cache, board/BIOS, SPD, graphics, and live-clock fields Linux exposes, including CPU revision/voltage/instructions/governor, extended family/model decoded from the reported CPUID family and model, cache associativity and line size from sysfs, DIMM bank/ECC/serial/voltage, UEFI mode, PCI host-bridge IDs, GPU PCI identity, and PCIe link speed/width. Intel and AMD GPU core clocks are read from driver sysfs when that interface is present. Standard Linux interfaces used here do not reliably expose CPU codename/process technology/TDP, multiplier, bus clock, chipset marketing name, DRAM timings/channel mode, module ranks/manufacture week, JEDEC/XMP/EXPO profiles, or GPU technology/memory bus width. Those CPU-Z fields are listed on their cards and left unavailable rather than inferred. CPU-Z benchmark and stress-test scores are not measured. SPD serials identify memory modules and are included in JSON exports.
 
 The Android collector uses public Android build properties, `ActivityManager` memory data, EGL/OpenGL renderer data, and best-effort kernel paths under `/sys`. OEM kernels and app permissions vary. CPU/GPU frequency, hybrid-core topology, caches and GPU names can be unavailable. Stock Android does not expose semiconductor process node or RAM type/timings through a standard app API. Android devices do not have a PC-style BIOS.
 

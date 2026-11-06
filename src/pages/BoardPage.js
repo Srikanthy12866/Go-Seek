@@ -1,6 +1,6 @@
 import { DataPanel, DataRow } from '../components/HardwareUI';
 import { useHardware } from '../context/HardwareContext';
-import { formatCapacity } from '../lib/formatters';
+import { formatCapacity, formatOptional } from '../lib/formatters';
 
 export default function BoardPage() {
   const { hardware } = useHardware();
@@ -14,8 +14,9 @@ export default function BoardPage() {
       <DataRow label="Board version" value={hardware.mainboard.version} />
       <DataRow label="Maximum memory / slots" value={`${formatCapacity(hardware.mainboard.memMax)} · ${hardware.mainboard.memSlots ?? 'Not reported'}`} />
       <DataRow label="PCI host bridge IDs" value={hardware.mainboard.hostBridges?.length ? hardware.mainboard.hostBridges.map(device => `${device.vendorId || 'N/A'}:${device.deviceId || 'N/A'}`).join(' · ') : 'Not reported by Linux PCI sysfs'} mono />
-      <DataRow label="Chipset / southbridge name" value="Not exposed by standard Linux hardware APIs" />
-      <DataRow label="LPCIO controller details" value="Not exposed by standard Linux hardware APIs" />
+      <DataRow label="Chipset" value={formatOptional(hardware.mainboard.chipset)} />
+      <DataRow label="Southbridge" value={formatOptional(hardware.mainboard.southbridge)} />
+      <DataRow label="LPCIO controller" value={formatOptional(hardware.mainboard.lpcio)} />
       <DataRow label="Virtual machine" value={hardware.system.virtual ? `Yes · ${hardware.system.virtualHost || 'host unknown'}` : 'No / unknown'} />
     </DataPanel>
     <DataPanel title="BIOS / firmware" icon="chip">

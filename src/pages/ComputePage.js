@@ -1,7 +1,7 @@
 import ComputeDashboard from '../components/ComputeDashboard';
 import { DataPanel, DataRow } from '../components/HardwareUI';
 import { useHardware } from '../context/HardwareContext';
-import { formatBytes, formatFrequency, formatVoltage } from '../lib/formatters';
+import { formatBytes, formatFrequency, formatOptional, formatVoltage, unavailableReading } from '../lib/formatters';
 
 export default function ComputePage() {
   const { hardware, frequencyHistory } = useHardware();
@@ -19,9 +19,16 @@ export default function ComputePage() {
     <div className="panel-grid">
       <DataPanel title="Processor & live clocks" icon="chip">
         <DataRow label="Processor name / specification" value={hardware.soc.name} />
+        <DataRow label="Code name" value={formatOptional(hardware.soc.codeName)} />
         <DataRow label="Vendor / package" value={`${hardware.soc.manufacturer} · ${hardware.soc.socket}`} />
+        <DataRow label="Manufacturing process" value={formatOptional(hardware.soc.processNode)} />
+        <DataRow label="Max TDP" value={formatOptional(Number.isFinite(hardware.soc.maxTdpWatts) ? `${hardware.soc.maxTdpWatts} W` : hardware.soc.maxTdpWatts)} />
         <DataRow label="Family / model / stepping" value={`${hardware.soc.family} / ${hardware.soc.model} / ${hardware.soc.stepping}`} />
+        <DataRow label="Extended family / extended model / model" value={hardware.soc.extendedFamily == null ? unavailableReading : `${hardware.soc.extendedFamily} / ${hardware.soc.extendedModel} / ${(hardware.soc.baseModel ?? 0).toString(16).toUpperCase()}`} />
         <DataRow label="Revision / voltage" value={`${hardware.soc.revision || 'Not reported'} · ${formatVoltage(hardware.soc.voltage)}`} />
+        <DataRow label="Multiplier" value={formatOptional(Number.isFinite(hardware.soc.multiplier) ? `× ${hardware.soc.multiplier}` : hardware.soc.multiplier)} />
+        <DataRow label="Bus speed" value={formatOptional(Number.isFinite(hardware.soc.busSpeedMhz) ? `${hardware.soc.busSpeedMhz} MHz` : hardware.soc.busSpeedMhz)} />
+        <DataRow label="Platform link (FSB / QPI / UPI / DMI)" value={formatOptional(hardware.soc.platformLink)} />
         <DataRow label="CPU architecture / operation modes" value={`${hardware.cpuInventory?.architecture || 'Not reported'} · ${hardware.cpuInventory?.operationModes || 'Not reported'}`} />
         <DataRow label="Vendor ID / byte order" value={`${hardware.cpuInventory?.vendorId || 'Not reported'} · ${hardware.cpuInventory?.byteOrder || 'Not reported'}`} />
         <DataRow label="Cores / threads" value={`${hardware.cpu.physicalCores ?? 'N/A'} cores · ${hardware.cpu.logicalCores} threads`} />
@@ -40,9 +47,7 @@ export default function ComputePage() {
         <DataRow label="L3 cache" value={formatBytes(hardware.cpu.caches.l3)} />
         <DataRow label="Linux cache summary" value={hardware.cpuInventory?.caches ? `L1d ${hardware.cpuInventory.caches.l1d || 'N/A'} · L1i ${hardware.cpuInventory.caches.l1i || 'N/A'} · L2 ${hardware.cpuInventory.caches.l2 || 'N/A'} · L3 ${hardware.cpuInventory.caches.l3 || 'N/A'}` : 'Not reported'} />
         <DataRow label="NUMA CPU map" value={hardware.cpuInventory?.numaCpuMap?.length ? hardware.cpuInventory.numaCpuMap.map(node => `Node ${node.node}: ${node.cpus}`).join(' · ') : 'Not reported'} />
-        <DataRow label="Linux cache summary" value={hardware.cpuInventory?.caches ? `L1d ${hardware.cpuInventory.caches.l1d || 'N/A'} · L1i ${hardware.cpuInventory.caches.l1i || 'N/A'} · L2 ${hardware.cpuInventory.caches.l2 || 'N/A'} · L3 ${hardware.cpuInventory.caches.l3 || 'N/A'}` : 'Not reported'} />
-        <DataRow label="NUMA CPU map" value={hardware.cpuInventory?.numaCpuMap?.length ? hardware.cpuInventory.numaCpuMap.map(node => `Node ${node.node}: ${node.cpus}`).join(' · ') : 'Not reported'} />
-        <DataRow label="Cache associativity / line size" value="Not exposed by standard Linux hardware APIs" />
+        {(hardware.cpu.cacheInstances || []).length ? hardware.cpu.cacheInstances.map((cache) => <DataRow key={`${cache.level}-${cache.type}-${cache.sharedCpuList}`} label={`L${cache.level} ${cache.type} descriptor`} value={[formatBytes(cache.sizeBytes), cache.ways ? `${cache.ways}-way` : null, cache.lineSizeBytes ? `${cache.lineSizeBytes}-byte line` : null, cache.sharedCpuList ? `CPUs ${cache.sharedCpuList}` : null].filter(Boolean).join(' · ')} />) : <DataRow label="Cache associativity / line size" value={unavailableReading} />}
         <DataRow label="CPU temperature" value={hardware.cpu.temperatureC != null ? `${hardware.cpu.temperatureC} °C` : 'Sensor unavailable'} />
       </DataPanel>
       <DataPanel title="Graphics adapter" icon="display">
@@ -52,9 +57,13 @@ export default function ComputePage() {
           <DataRow label="Bus / PCI ID" value={`${gpu.bus || 'Not reported'} · ${gpu.pciID || gpu.busAddress || 'Not reported'}`} mono />
           <DataRow label="Core / memory clock" value={`${gpu.clockCore ? `${gpu.clockCore} MHz` : 'Not reported'} · ${gpu.clockMemory ? `${gpu.clockMemory} MHz` : 'Not reported'}`} />
           <DataRow label="Driver / temperature" value={`${gpu.driverVersion || 'Not reported'} · ${gpu.temperatureGpu != null ? `${gpu.temperatureGpu} °C` : 'Not reported'}`} />
-          <DataRow label="GPU codename / technology / die size" value="Not exposed by standard Linux graphics APIs" />
-          <DataRow label="GPU memory type / bus width" value="Not exposed by standard Linux graphics APIs" />
-          <DataRow label="GPU BIOS version" value="Not exposed by standard Linux graphics APIs" />
+          <DataRow label="GPU code name" value={formatOptional(gpu.codeName)} />
+          <DataRow label="GPU technology / die size" value={`${formatOptional(gpu.technology)} · ${formatOptional(gpu.dieSize)}`} />
+          <DataRow label="Transistor count / release date" value={`${formatOptional(gpu.transistorCount)} · ${formatOptional(gpu.releaseDate)}`} />
+          <DataRow label="Shaders / TMUs / ROPs" value={`${formatOptional(gpu.shaders)} · ${formatOptional(gpu.tmus)} · ${formatOptional(gpu.rops)}`} />
+          <DataRow label="Memory type / bus width" value={`${formatOptional(gpu.memoryType)} · ${formatOptional(Number.isFinite(gpu.memoryBusWidthBits) ? `${gpu.memoryBusWidthBits}-bit` : gpu.memoryBusWidthBits)}`} />
+          <DataRow label="Shader clock" value={formatOptional(Number.isFinite(gpu.shaderClockMhz) ? `${gpu.shaderClockMhz} MHz` : gpu.shaderClockMhz)} />
+          <DataRow label="GPU BIOS version" value={formatOptional(gpu.biosVersion)} />
         </div>) : <DataRow label="Graphics" value="No controller details reported" />}
       </DataPanel>
       <DataPanel title="Firmware & sensors" icon="chip">
@@ -62,6 +71,12 @@ export default function ComputePage() {
         <DataRow label="CPU temperature" value={hardware.cpu.temperatureC != null ? `${hardware.cpu.temperatureC} °C` : 'Not reported'} />
         <DataRow label="Per-core temperatures" value={hardware.cpu.perCoreTemperatureC?.length ? hardware.cpu.perCoreTemperatureC.map((value, index) => `C${index} ${value} °C`).join(' · ') : 'Not reported'} />
         {(hardware.sensors?.fans || []).map((fan, index) => <DataRow key={`fan-${index}`} label={fan.label || `Fan ${index + 1}`} value={`${fan.rpm} RPM${fan.controller ? ` · ${fan.controller}` : ''}`} />)}
+      </DataPanel>
+      <DataPanel title="CPU benchmark" icon="chip">
+        <DataRow label="Single-thread score" value={formatOptional(hardware.bench?.singleThread, 'Not measured')} />
+        <DataRow label="Multi-thread score" value={formatOptional(hardware.bench?.multiThread, 'Not measured')} />
+        <DataRow label="Reference CPU comparison" value={formatOptional(hardware.bench?.referenceComparison, 'Not measured')} />
+        <DataRow label="Stress test" value={formatOptional(hardware.bench?.stressTest, 'Not run')} />
       </DataPanel>
     </div>
   </>;

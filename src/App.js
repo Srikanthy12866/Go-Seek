@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { HashRouter, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { HashRouter, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { HardwareProvider, useHardware } from './context/HardwareContext';
 import { Icon } from './components/HardwareUI';
 import OverviewPage from './pages/OverviewPage';
@@ -12,6 +12,7 @@ import StoragePage from './pages/StoragePage';
 import ConnectivityPage from './pages/ConnectivityPage';
 import DevicesPage from './pages/DevicesPage';
 import EnvironmentPage from './pages/EnvironmentPage';
+import { searchParameters } from './lib/searchParameters';
 import './App.css';
 
 const sections = [
@@ -30,7 +31,10 @@ const sections = [
 function AppLayout() {
   const { hardware, loading, refresh } = useHardware();
   const [copied, setCopied] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const location = useLocation();
+  const navigate = useNavigate();
+  const searchResults = searchParameters(hardware, searchQuery);
   const visibleSections = window.deviceHardware
     ? sections
     : sections.filter(section => !['storage', 'devices', 'applications'].includes(section.id));
@@ -55,6 +59,11 @@ function AppLayout() {
     }
   };
 
+  const selectSearchResult = (result) => {
+    navigate(result.route);
+    setSearchQuery('');
+  };
+
   return <div className="app-shell">
     <aside className="sidebar">
       <NavLink className="brand" to="/overview" aria-label="Go Seek home">
@@ -77,7 +86,34 @@ function AppLayout() {
     </aside>
 
     <main className="main-area">
-      <header className="topbar"><div className="breadcrumb">DIAGNOSTICS <span>/</span> DEVICE PROFILE</div><div className="topbar-status"><span className="live-dot" /> {window.deviceHardware ? 'LIVE · 1 SECOND' : 'BROWSER SNAPSHOT'}</div></header>
+      <header className="topbar">
+        <div className="breadcrumb">DIAGNOSTICS <span>/</span> DEVICE PROFILE</div>
+        <div className="parameter-search">
+          <Icon name="search" size={16} />
+          <input
+            aria-label="Search parameters"
+            aria-controls="parameter-search-results"
+            autoComplete="off"
+            disabled={!hardware}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && searchResults[0]) selectSearchResult(searchResults[0]);
+              if (event.key === 'Escape') setSearchQuery('');
+            }}
+            placeholder="Search parameters"
+            role="searchbox"
+            type="search"
+            value={searchQuery}
+          />
+          {searchQuery.trim() && <div className="parameter-search-results" id="parameter-search-results" role="listbox" aria-label="Matching hardware parameters">
+            {searchResults.length ? searchResults.map(result => <button key={result.key} role="option" aria-selected="false" className="parameter-search-result" onClick={() => selectSearchResult(result)}>
+              <span><strong>{result.label}</strong><small>{result.value}</small></span>
+              <span className="parameter-search-route">{result.route.slice(1)}</span>
+            </button>) : <div className="parameter-search-empty">No matching parameters</div>}
+          </div>}
+        </div>
+        <div className="topbar-status"><span className="live-dot" /> {window.deviceHardware ? 'LIVE · 1 SECOND' : 'BROWSER SNAPSHOT'}</div>
+      </header>
       <div className="content-wrap">
         <div className="page-heading">
           <div><div className="eyebrow">HARDWARE & SYSTEM PROFILE <span>•</span> LIVE READOUT</div><h1>Your device,<br className="mobile-break" /> in detail.</h1><p className="subtitle">{window.deviceHardware ? 'Local operating-system hardware telemetry, refreshed every second.' : 'Browser-limited snapshot. Run the desktop app for host hardware details.'}</p></div>
@@ -104,7 +140,7 @@ function AppLayout() {
         </Routes>
 
         {loading && !hardware && <div className="loading-state"><span className="loader" /> Reading available device information…</div>}
-        <footer className="page-footer"><span>GO SEEK SYSTEMS <span className="footer-divider">/</span> DEVICE REPORT</span><span>LOCAL READOUT · NO DATA UPLOAD</span></footer>
+        <footer className="page-footer"><span>GO SEEK SYSTEMS <span className="footer-divider">/</span> DEVICE REPORT</span><span>LOCAL READOUT · NO DATA UPLOAD</span><span className="print-attribution">Powered by Srikanth Yepalagunta</span></footer>
       </div>
     </main>
   </div>;

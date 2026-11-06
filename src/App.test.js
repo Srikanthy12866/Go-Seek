@@ -9,6 +9,7 @@ afterEach(() => {
 test('renders the device report and browser access note', async () => {
   render(<App />);
   expect(screen.getByRole('heading', { name: /your device, in detail/i })).toBeInTheDocument();
+  expect(screen.getByText('Powered by Srikanth Yepalagunta')).toHaveClass('print-attribution');
   expect(screen.getByText(/browser-limited report/i)).toBeInTheDocument();
   expect(await screen.findByRole('button', { name: /refresh/i })).toBeInTheDocument();
 });
@@ -22,7 +23,8 @@ test('renders desktop Linux inventory without host identifiers', async () => {
       soc: {
         name: 'Test CPU', manufacturer: 'Test Vendor', family: '6', model: '1', stepping: '3',
         revision: 'A1', socket: 'AM4', voltage: '1.20', instructions: ['sse', 'sse2', 'avx2'],
-        processNode: 'Not reported',
+        processNode: 'Not reported', codeName: null, maxTdpWatts: null, extendedFamily: 0, extendedModel: 0, baseModel: 1,
+        multiplier: null, busSpeedMhz: null, platformLink: null,
       },
       cpu: {
         logicalCores: 8,
@@ -38,6 +40,7 @@ test('renders desktop Linux inventory without host identifiers', async () => {
         utilizationPercent: 61,
         perCoreUtilizationPercent: [28, 87],
         caches: {},
+        cacheInstances: [{ level: 1, type: 'Data', sizeBytes: 32768, ways: 8, lineSizeBytes: 64, sharedCpuList: '0,2' }],
         temperatureC: null,
         perCoreTemperatureC: [],
         microcodeRevision: '0x1234',
@@ -61,13 +64,17 @@ test('renders desktop Linux inventory without host identifiers', async () => {
       applicationsSupported: true,
       applications: [{ pid: 4321, name: 'Firefox', cpuPercent: 26.3, memoryPercent: 2.5, residentBytes: 512 * 1024 ** 2, state: 'running', started: '2026-11-06 09:00:00', childProcessCount: 4 }],
       graphics: [{ vendor: 'Test GPU vendor', subVendor: 'Test GPU board', model: 'Test GPU', bus: 'PCIe', busAddress: '0000:01:00.0', pciID: '1234:abcd', pciLink: { currentSpeed: '16.0 GT/s PCIe', currentWidth: '8', maxSpeed: '16.0 GT/s PCIe', maxWidth: '16' }, vram: 8192, vramDynamic: true, clockCore: 1200, clockMemory: 7000, utilizationGpu: 53, temperatureGpu: 61 }],
+      bench: { singleThread: null, multiThread: null, referenceComparison: null, stressTest: null },
       memory: {
         totalBytes: 16 * 1024 ** 3,
         availableBytes: 8 * 1024 ** 3,
-        modules: [{ size: 8 * 1024 ** 3, type: 'DDR4', clockSpeed: 3200, formFactor: 'DIMM', bank: 'BANK 0', manufacturer: 'Test Vendor', partNum: 'TEST-8G', serialNum: 'SPD-SERIAL-1234', ecc: 'No', voltageConfigured: 1.2, voltageMin: 1.1, voltageMax: 1.35 }],
+        channelMode: null,
+        dramFrequencyMhz: null,
+        timings: { cl: null, trcd: null, trp: null, tras: null, trc: null, commandRate: null },
+        modules: [{ size: 8 * 1024 ** 3, type: 'DDR4', clockSpeed: 3200, formFactor: 'DIMM', bank: 'BANK 0', manufacturer: 'Test Vendor', partNum: 'TEST-8G', serialNum: 'SPD-SERIAL-1234', ecc: 'No', voltageConfigured: 1.2, voltageMin: 1.1, voltageMax: 1.35, ranks: null, maxBandwidth: null, manufactureWeek: null, manufactureYear: null, dramManufacturer: null, jedecTimings: null, xmpProfiles: null }],
       },
       system: {},
-      mainboard: { manufacturer: 'Test Board vendor', model: 'Test Board', memMax: 32 * 1024 ** 3, memSlots: 2, hostBridges: [{ classCode: '0x060000', vendorId: '0x8086', deviceId: '0x1234' }] },
+      mainboard: { manufacturer: 'Test Board vendor', model: 'Test Board', memMax: 32 * 1024 ** 3, memSlots: 2, chipset: null, southbridge: null, lpcio: null, hostBridges: [{ classCode: '0x060000', vendorId: '0x8086', deviceId: '0x1234' }] },
       bios: { bootMode: 'UEFI' },
       display: [],
       storage: {
@@ -107,6 +114,13 @@ test('renders desktop Linux inventory without host identifiers', async () => {
   expect(screen.queryByRole('heading', { name: 'USB devices' })).not.toBeInTheDocument();
   expect(await screen.findByRole('img', { name: 'CPU average frequency trend over the last minute' })).toBeInTheDocument();
 
+  fireEvent.change(screen.getByRole('searchbox', { name: 'Search parameters' }), { target: { value: 'BogoMIPS' } });
+  const searchResult = screen.getByRole('option', { name: /Bogo Mips.*6585\.26/i });
+  expect(searchResult).toBeInTheDocument();
+  fireEvent.click(searchResult);
+  expect(window.location.hash).toBe('#/compute');
+  expect(screen.getByRole('heading', { name: 'Processor & live clocks' })).toBeInTheDocument();
+
   fireEvent.click(screen.getByRole('link', { name: 'Applications' }));
   expect(window.location.hash).toBe('#/applications');
   expect(screen.getByRole('heading', { name: 'Current user applications' })).toBeInTheDocument();
@@ -121,9 +135,13 @@ test('renders desktop Linux inventory without host identifiers', async () => {
   expect(screen.getByText(/1 · BANK 0 · No/)).toBeInTheDocument();
   expect(screen.getByText(/1\.20 V · 1\.10 V · 1\.35 V/)).toBeInTheDocument();
   expect(screen.getByText('SPD-SERIAL-1234')).toBeInTheDocument();
-  expect(screen.getByText(/Module timings/)).toBeInTheDocument();
+  expect(screen.getByText('CAS latency (CL)')).toBeInTheDocument();
+  expect(screen.getByText('XMP / EXPO profiles')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('link', { name: 'Board & BIOS' }));
   expect(screen.getByRole('heading', { name: 'System & mainboard' })).toBeInTheDocument();
+  expect(screen.getByText('Chipset')).toBeInTheDocument();
+  expect(screen.getByText('Southbridge')).toBeInTheDocument();
+  expect(screen.getByText('LPCIO controller')).toBeInTheDocument();
   expect(screen.getByText(/0x8086:0x1234/)).toBeInTheDocument();
   expect(screen.getByText(/Maximum memory/)).toBeInTheDocument();
   expect(screen.getByText('UEFI')).toBeInTheDocument();
@@ -139,7 +157,11 @@ test('renders desktop Linux inventory without host identifiers', async () => {
   expect(screen.getByText(/AM4/)).toBeInTheDocument();
   expect(screen.getByText(/x86_64 · 32-bit, 64-bit/)).toBeInTheDocument();
   expect(screen.getByText(/6585\.26/)).toBeInTheDocument();
-  expect(screen.getAllByText(/Node 0: 0-3/)).toHaveLength(2);
+  expect(screen.getAllByText(/Node 0: 0-3/)).toHaveLength(1);
+  expect(screen.getByText('Code name')).toBeInTheDocument();
+  expect(screen.getByText(/0 \/ 0 \/ 1/)).toBeInTheDocument();
+  expect(screen.getByText(/8-way · 64-byte line/)).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'CPU benchmark' })).toBeInTheDocument();
   expect(screen.getByText(/sse, sse2, avx2/)).toBeInTheDocument();
   expect(screen.getByText(/Test GPU board/)).toBeInTheDocument();
   expect(screen.getByText(/1234:abcd/)).toBeInTheDocument();
