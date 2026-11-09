@@ -1,6 +1,6 @@
 {
   "name": "go-seek",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "homepage": ".",
   "main": "electron/main.cjs",
@@ -54,6 +54,9 @@
   "build": {
     "appId": "com.goseek.app",
     "productName": "Go Seek",
+    "toolsets": {
+      "appimage": "1.0.3"
+    },
     "extraMetadata": {
       "main": "electron/main.cjs"
     },
@@ -67,6 +70,9 @@
       "target": [
         "AppImage",
         "deb"
+      ],
+      "executableArgs": [
+        "--no-sandbox"
       ],
       "icon": "mobile/assets/icon.png",
       "category": "Utility",
