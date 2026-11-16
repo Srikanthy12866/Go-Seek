@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import './AuthModal.css';
 
-const AUTH_API = process.env.REACT_APP_AUTH_API || 'http://localhost:8081/api/auth';
+const AUTH_API = process.env.REACT_APP_AUTH_API || 'https://auth-service-v3f4.onrender.com/api/auth';
 
 export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
   const [mode, setMode] = useState('login'); // 'login' or 'register'

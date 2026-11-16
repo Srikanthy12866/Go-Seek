@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import './TicketModal.css';
 
-const APP_API = process.env.REACT_APP_APP_API || 'http://localhost:8082/api';
+const APP_API = process.env.REACT_APP_APP_API || 'https://go-seek-backend.onrender.com/api';
 
 export default function TicketModal({ isOpen, onClose, currentUser, hardwareSnapshot }) {
   const [title, setTitle] = useState('');
