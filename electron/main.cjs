@@ -1032,6 +1032,7 @@ function createWindow() {
     backgroundColor: '#f7f8f3',
     title: 'Go Seek | Device Report',
     icon: iconPath,
+    show: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -1040,24 +1041,42 @@ function createWindow() {
     },
   });
 
+  window.once('ready-to-show', () => {
+    log('ready-to-show event fired');
+    window.show();
+    window.focus();
+    if (typeof window.restore === 'function') window.restore();
+  });
+
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) shell.openExternal(url);
     return { action: 'deny' };
   });
 
   const buildIndexPath = path.join(__dirname, '..', 'build', 'index.html');
+  const devServerUrl = process.env.ELECTRON_START_URL || 'http://localhost:3000';
   if (app.isPackaged) {
     log('Loading packaged file: ' + buildIndexPath);
     window.loadFile(buildIndexPath);
   } else if (process.env.ELECTRON_START_URL) {
     log('Loading start url: ' + process.env.ELECTRON_START_URL);
     window.loadURL(process.env.ELECTRON_START_URL);
-  } else if (require('node:fs').existsSync(buildIndexPath)) {
-    log('Loading build index: ' + buildIndexPath);
-    window.loadFile(buildIndexPath);
   } else {
-    log('Fallback to localhost:3000');
-    window.loadURL('http://localhost:3000');
+    // Check if localhost:3000 is running, otherwise load static build
+    const http = require('node:http');
+    const req = http.get('http://localhost:3000', (res) => {
+      log('Dev server running on 3000, loading URL');
+      window.loadURL('http://localhost:3000');
+    });
+    req.on('error', () => {
+      if (require('node:fs').existsSync(buildIndexPath)) {
+        log('Loading build index: ' + buildIndexPath);
+        window.loadFile(buildIndexPath);
+      } else {
+        log('Fallback to localhost:3000');
+        window.loadURL('http://localhost:3000');
+      }
+    });
   }
 
   window.webContents.on('did-finish-load', () => {
