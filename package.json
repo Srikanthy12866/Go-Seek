@@ -22,7 +22,11 @@
     "build": "react-scripts build",
     "test": "react-scripts test",
     "desktop": "concurrently -k -n ui,desktop \"cross-env BROWSER=none react-scripts start\" \"wait-on http://localhost:3000 && cross-env ELECTRON_RUN_AS_NODE= ELECTRON_START_URL=http://localhost:3000 electron . --no-sandbox\"",
+    "desktop:start": "electron .",
     "desktop:build": "npm run build && electron-builder",
+    "desktop:win": "npm run build && electron-builder --win",
+    "desktop:win:x64": "npm run build && electron-builder --win --x64",
+    "desktop:win:dir": "npm run build && electron-builder --win --dir",
     "desktop:linux-arm64": "npm run build && electron-builder --linux AppImage deb --arm64",
     "eject": "react-scripts eject"
   },
@@ -82,9 +86,19 @@
     },
     "win": {
       "target": [
-        "nsis"
+        "nsis",
+        "portable"
       ],
+      "icon": "mobile/assets/icon.png",
       "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Go Seek"
     },
     "mac": {
       "target": [

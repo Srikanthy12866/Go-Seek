@@ -1,8 +1,23 @@
 const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs/promises');
+const syncFs = require('node:fs');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
+
+const logFile = path.join(__dirname, '..', 'electron-run.log');
+function log(msg) {
+  try { syncFs.appendFileSync(logFile, `[${new Date().toISOString()}] ${msg}\n`); } catch (_) {}
+}
+log('main.cjs started. Node: ' + process.version + ', Platform: ' + process.platform);
+
+process.on('uncaughtException', (err) => {
+  log('Uncaught Exception: ' + (err?.stack || err));
+});
+process.on('unhandledRejection', (reason) => {
+  log('Unhandled Rejection: ' + (reason?.stack || reason));
+});
+
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const systemInformation = require('systeminformation');
 
@@ -810,21 +825,21 @@ async function getStaticInventory() {
 
       return {
         storage: {
-          disks: diskLayout.map((disk) => pick(disk, [
+          disks: (diskLayout || []).map((disk) => pick(disk, [
             'name', 'vendor', 'type', 'size', 'firmwareRevision', 'interfaceType', 'smartStatus', 'temperature',
           ])),
-          devices: blockDevices.filter((device) => device.physical).map((device) => pick(device, [
+          devices: (blockDevices || []).filter((device) => device && device.physical).map((device) => pick(device, [
             'model', 'type', 'size', 'physical', 'protocol', 'removable',
           ])),
         },
-        network: networkInterfaces.map((network) => pick(network, [
+        network: (networkInterfaces || []).map((network) => pick(network, [
           'iface', 'type', 'default', 'operstate', 'duplex', 'speed', 'mtu', 'internal', 'virtual',
         ])),
-        usb: usbDevices.map((device) => pick(device, [
+        usb: (usbDevices || []).map((device) => pick(device, [
           'bus', 'name', 'type', 'manufacturer', 'vendor', 'removable', 'maxPower',
         ])),
-        pci: pciDevices.filter((device) => device.vendorId || device.deviceId),
-        staticTelemetry,
+        pci: (pciDevices || []).filter((device) => device && (device.vendorId || device.deviceId)),
+        staticTelemetry: staticTelemetry || {},
       };
     })();
   }
@@ -986,16 +1001,16 @@ async function getHardwareSnapshot() {
     ])),
     ...inventory,
     storage: {
-      ...inventory.storage,
-      filesystems: filesystems.map((filesystem) => pick(filesystem, [
+      ...(inventory ? inventory.storage : {}),
+      filesystems: (filesystems || []).map((filesystem) => pick(filesystem, [
         'type', 'size', 'used', 'available', 'use', 'rw',
       ])),
     },
     storageIO: {
-      readBytesPerSecond: storageIO.rx_sec ?? null,
-      writeBytesPerSecond: storageIO.wx_sec ?? null,
+      readBytesPerSecond: storageIO?.rx_sec ?? null,
+      writeBytesPerSecond: storageIO?.wx_sec ?? null,
     },
-    networkTraffic: networkStats.map((stats) => pick(stats, ['operstate', 'rx_sec', 'tx_sec'])),
+    networkTraffic: (networkStats || []).map((stats) => pick(stats, ['operstate', 'rx_sec', 'tx_sec'])),
     battery: pick(battery, [
       'hasBattery', 'isCharging', 'designedCapacity', 'maxCapacity', 'currentCapacity', 'capacityUnit', 'voltage', 'percent', 'timeRemaining', 'acConnected',
     ]),
@@ -1007,6 +1022,8 @@ async function getHardwareSnapshot() {
 }
 
 function createWindow() {
+  log('createWindow called');
+  const iconPath = path.join(__dirname, '..', 'mobile', 'assets', 'icon.png');
   const window = new BrowserWindow({
     width: 1440,
     height: 960,
@@ -1014,6 +1031,7 @@ function createWindow() {
     minHeight: 640,
     backgroundColor: '#f7f8f3',
     title: 'Go Seek | Device Report',
+    icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -1027,16 +1045,36 @@ function createWindow() {
     return { action: 'deny' };
   });
 
+  const buildIndexPath = path.join(__dirname, '..', 'build', 'index.html');
   if (app.isPackaged) {
-    window.loadFile(path.join(__dirname, '..', 'build', 'index.html'));
+    log('Loading packaged file: ' + buildIndexPath);
+    window.loadFile(buildIndexPath);
+  } else if (process.env.ELECTRON_START_URL) {
+    log('Loading start url: ' + process.env.ELECTRON_START_URL);
+    window.loadURL(process.env.ELECTRON_START_URL);
+  } else if (require('node:fs').existsSync(buildIndexPath)) {
+    log('Loading build index: ' + buildIndexPath);
+    window.loadFile(buildIndexPath);
   } else {
-    window.loadURL(process.env.ELECTRON_START_URL || 'http://localhost:3000');
+    log('Fallback to localhost:3000');
+    window.loadURL('http://localhost:3000');
   }
+
+  window.webContents.on('did-finish-load', () => {
+    log('Window webContents did-finish-load');
+  });
+  window.webContents.on('did-fail-load', (e, code, desc) => {
+    log(`Window webContents did-fail-load: ${code} - ${desc}`);
+  });
 }
 
-ipcMain.handle('device:get-hardware-snapshot', getHardwareSnapshot);
+ipcMain.handle('device:get-hardware-snapshot', async (event) => {
+  log('device:get-hardware-snapshot requested');
+  return getHardwareSnapshot();
+});
 
 app.whenReady().then(() => {
+  log('app.whenReady resolved');
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -1044,5 +1082,6 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  log('window-all-closed fired');
   if (process.platform !== 'darwin') app.quit();
 });
