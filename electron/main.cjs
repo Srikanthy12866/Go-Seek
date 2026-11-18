@@ -38,11 +38,17 @@ async function readLinuxPciDevices() {
   const devices = await readSafely(() => fs.readdir('/sys/bus/pci/devices'), []);
   return Promise.all(devices.map(async (device) => {
     const directory = path.join('/sys/bus/pci/devices', device);
-    const [classCode, vendorId, deviceId, subsystemVendorId, subsystemDeviceId] = await Promise.all([
+    const [classCode, vendorId, deviceId, subsystemVendorId, subsystemDeviceId, aerCorrectable, aerNonFatal, aerFatal, powerControl, runtimeStatus, linkSpeed, linkWidth] = await Promise.all([
       'class', 'vendor', 'device', 'subsystem_vendor', 'subsystem_device',
+      'aer_dev_correctable', 'aer_dev_nonfatal', 'aer_dev_fatal',
+      'power/control', 'power/runtime_status', 'current_link_speed', 'current_link_width',
     ].map((file) => readSafely(() => fs.readFile(path.join(directory, file), 'utf8').then((value) => value.trim()), null)));
 
-    return { classCode, vendorId, deviceId, subsystemVendorId, subsystemDeviceId };
+    return {
+      address: device,
+      classCode, vendorId, deviceId, subsystemVendorId, subsystemDeviceId,
+      aerCorrectable, aerNonFatal, aerFatal, powerControl, runtimeStatus, linkSpeed, linkWidth,
+    };
   }));
 }
 
@@ -59,15 +65,466 @@ async function readLinuxFanSpeeds() {
     const fanFiles = files.filter((file) => /^fan\d+_input$/.test(file));
     return Promise.all(fanFiles.map(async (file) => {
       const number = file.match(/\d+/)?.[0];
-      const [rpm, label] = await Promise.all([
+      const [rpm, label, pwm] = await Promise.all([
         readSafely(() => fs.readFile(path.join(directory, file), 'utf8').then((value) => Number(value.trim())), null),
         readSafely(() => fs.readFile(path.join(directory, `fan${number}_label`), 'utf8').then((value) => value.trim()), null),
+        readSafely(() => fs.readFile(path.join(directory, `pwm${number}`), 'utf8').then((value) => Number(value.trim())), null),
       ]);
-      return Number.isFinite(rpm) ? { controller: name, label, rpm } : null;
+      return Number.isFinite(rpm) ? { controller: name, label, rpm, pwmDutyPercent: Number.isFinite(pwm) ? Math.round((pwm / 255) * 100) : null } : null;
     }));
   }));
 
   return readings.flat().filter(Boolean).slice(0, 32);
+}
+
+async function readLinuxStaticTelemetry() {
+  if (process.platform !== 'linux') return {};
+
+  const [
+    deviceTreeModel, deviceTreeCompatible, secureBoot, tpmVersion, tpmPcrBanks,
+    ipmiPresent, acpiTables, chassisType, boardAssetTag, wakeupText,
+    drmConnectors, backlights, audioCardsText, audioCodecs,
+    usbRootHubs, usbDevSpeeds, thunderboltDevs, cxlDevs, iommuGroups,
+    i2cDevs, spiDevs, spiMasters, ttyDevs, gpioDevs, watchdogDevs,
+    clocksourceCur, clocksourceAvail, rtcInfo, pwmChips, canIfaces, dmaText, iioDevs,
+    accelDevs, migCaps, msrAccess,
+  ] = await Promise.all([
+    readSafely(() => fs.readFile('/sys/firmware/devicetree/base/model', 'utf8').then((v) => v.replace(/\0/g, '').trim()), null),
+    readSafely(() => fs.readFile('/sys/firmware/devicetree/base/compatible', 'utf8').then((v) => v.replace(/\0/g, ' ').trim()), null),
+    readSafely(async () => {
+      const vars = await fs.readdir('/sys/firmware/efi/efivars');
+      const sbVar = vars.find((f) => f.startsWith('SecureBoot-'));
+      if (!sbVar) return 'EFI variables present (SecureBoot variable not found)';
+      const buf = await readSafely(() => fs.readFile(path.join('/sys/firmware/efi/efivars', sbVar)), null);
+      if (!buf || buf.length < 5) return 'UEFI SecureBoot variable unreadable';
+      return buf[4] === 1 ? 'Enabled' : 'Disabled';
+    }, null),
+    readSafely(() => fs.readFile('/sys/class/tpm/tpm0/tpm_version_major', 'utf8').then((v) => `TPM ${v.trim()}.0`), null),
+    readSafely(async () => {
+      const entries = await fs.readdir('/sys/class/tpm/tpm0');
+      return entries.filter((e) => e.startsWith('pcr-'));
+    }, []),
+    readSafely(() => fs.access('/dev/ipmi0').then(() => 'Present (/dev/ipmi0)'), null),
+    readSafely(async () => {
+      const entries = await fs.readdir('/sys/firmware/acpi/tables');
+      return entries.filter((e) => !['data', 'dynamic'].includes(e));
+    }, []),
+    readSafely(() => fs.readFile('/sys/devices/virtual/dmi/id/chassis_type', 'utf8').then((v) => v.trim()), null),
+    readSafely(() => fs.readFile('/sys/devices/virtual/dmi/id/board_asset_tag', 'utf8').then((v) => v.trim()), null),
+    readSafely(() => fs.readFile('/proc/acpi/wakeup', 'utf8'), ''),
+    readSafely(async () => {
+      const entries = (await fs.readdir('/sys/class/drm')).filter((n) => /^card\d+-/.test(n));
+      return Promise.all(entries.map(async (conn) => {
+        const dir = path.join('/sys/class/drm', conn);
+        const [status, enabled, modesText, edidBuf] = await Promise.all([
+          readSafely(() => fs.readFile(path.join(dir, 'status'), 'utf8').then((v) => v.trim()), null),
+          readSafely(() => fs.readFile(path.join(dir, 'enabled'), 'utf8').then((v) => v.trim()), null),
+          readSafely(() => fs.readFile(path.join(dir, 'modes'), 'utf8').then((v) => v.trim().split('\n').filter(Boolean)), []),
+          readSafely(() => fs.readFile(path.join(dir, 'edid')), null),
+        ]);
+        return { connector: conn, status, enabled, nativeMode: modesText[0] || null, edidBytes: edidBuf ? edidBuf.length : 0 };
+      }));
+    }, []),
+    readSafely(async () => {
+      const entries = await fs.readdir('/sys/class/backlight');
+      return Promise.all(entries.map(async (bl) => {
+        const dir = path.join('/sys/class/backlight', bl);
+        const [actual, max] = await Promise.all([
+          readSafely(() => fs.readFile(path.join(dir, 'actual_brightness'), 'utf8').then((v) => Number(v.trim())), null),
+          readSafely(() => fs.readFile(path.join(dir, 'max_brightness'), 'utf8').then((v) => Number(v.trim())), null),
+        ]);
+        return { name: bl, actual, max };
+      }));
+    }, []),
+    readSafely(() => fs.readFile('/proc/asound/cards', 'utf8'), ''),
+    readSafely(async () => {
+      const cards = (await fs.readdir('/proc/asound')).filter((n) => /^card\d+$/.test(n));
+      const codecs = [];
+      for (const card of cards) {
+        const files = (await readSafely(() => fs.readdir(path.join('/proc/asound', card)), [])).filter((f) => f.startsWith('codec#'));
+        for (const file of files) {
+          const text = await readSafely(() => fs.readFile(path.join('/proc/asound', card, file), 'utf8'), '');
+          const codec = text.match(/^Codec:\s*(.+)$/m)?.[1]?.trim();
+          const vendorId = text.match(/^Vendor Id:\s*(.+)$/m)?.[1]?.trim();
+          const subsystemId = text.match(/^Subsystem Id:\s*(.+)$/m)?.[1]?.trim();
+          if (codec) codecs.push({ card, codec, vendorId, subsystemId });
+        }
+      }
+      return codecs;
+    }, []),
+    readSafely(async () => {
+      const entries = (await fs.readdir('/sys/bus/usb/devices')).filter((n) => /^usb\d+$/.test(n));
+      return Promise.all(entries.map(async (bus) => {
+        const dir = path.join('/sys/bus/usb/devices', bus);
+        const [speed, version, product] = await Promise.all([
+          readSafely(() => fs.readFile(path.join(dir, 'speed'), 'utf8').then((v) => v.trim()), null),
+          readSafely(() => fs.readFile(path.join(dir, 'version'), 'utf8').then((v) => v.trim()), null),
+          readSafely(() => fs.readFile(path.join(dir, 'product'), 'utf8').then((v) => v.trim()), null),
+        ]);
+        return { bus, speedMbps: speed, version, product };
+      }));
+    }, []),
+    readSafely(async () => {
+      const entries = (await fs.readdir('/sys/bus/usb/devices')).filter((n) => /^\d+-[\d.]+$/.test(n));
+      return Promise.all(entries.slice(0, 24).map(async (id) => {
+        const dir = path.join('/sys/bus/usb/devices', id);
+        const [speed, maxPower, product] = await Promise.all([
+          readSafely(() => fs.readFile(path.join(dir, 'speed'), 'utf8').then((v) => v.trim()), null),
+          readSafely(() => fs.readFile(path.join(dir, 'bMaxPower'), 'utf8').then((v) => v.trim()), null),
+          readSafely(() => fs.readFile(path.join(dir, 'product'), 'utf8').then((v) => v.trim()), null),
+        ]);
+        return { id, speedMbps: speed, maxPower, product };
+      }));
+    }, []),
+    readSafely(() => fs.readdir('/sys/bus/thunderbolt/devices'), []),
+    readSafely(() => fs.readdir('/sys/bus/cxl/devices'), []),
+    readSafely(() => fs.readdir('/sys/kernel/iommu_groups'), []),
+    readSafely(() => fs.readdir('/sys/bus/i2c/devices'), []),
+    readSafely(() => fs.readdir('/sys/bus/spi/devices'), []),
+    readSafely(() => fs.readdir('/sys/class/spi_master'), []),
+    readSafely(async () => {
+      const ttys = await fs.readdir('/sys/class/tty');
+      return ttys.filter((t) => /^tty(S|USB|AMA|ACM)\d+$/.test(t)).slice(0, 16);
+    }, []),
+    readSafely(() => fs.readdir('/sys/bus/gpio/devices'), []),
+    readSafely(async () => {
+      const wds = await fs.readdir('/sys/class/watchdog');
+      return Promise.all(wds.map(async (w) => {
+        const dir = path.join('/sys/class/watchdog', w);
+        const [identity, state, timeout] = await Promise.all([
+          readSafely(() => fs.readFile(path.join(dir, 'identity'), 'utf8').then((v) => v.trim()), null),
+          readSafely(() => fs.readFile(path.join(dir, 'state'), 'utf8').then((v) => v.trim()), null),
+          readSafely(() => fs.readFile(path.join(dir, 'timeout'), 'utf8').then((v) => v.trim()), null),
+        ]);
+        return { name: w, identity, state, timeoutSec: timeout };
+      }));
+    }, []),
+    readSafely(() => fs.readFile('/sys/devices/system/clocksource/clocksource0/current_clocksource', 'utf8').then((v) => v.trim()), null),
+    readSafely(() => fs.readFile('/sys/devices/system/clocksource/clocksource0/available_clocksource', 'utf8').then((v) => v.trim()), null),
+    readSafely(async () => {
+      const [name, date, time, wakealarm] = await Promise.all([
+        readSafely(() => fs.readFile('/sys/class/rtc/rtc0/name', 'utf8').then((v) => v.trim()), null),
+        readSafely(() => fs.readFile('/sys/class/rtc/rtc0/date', 'utf8').then((v) => v.trim()), null),
+        readSafely(() => fs.readFile('/sys/class/rtc/rtc0/time', 'utf8').then((v) => v.trim()), null),
+        readSafely(() => fs.readFile('/sys/class/rtc/rtc0/wakealarm', 'utf8').then((v) => v.trim()), null),
+      ]);
+      return name ? { name, date, time, wakealarm: wakealarm || 'None' } : null;
+    }, null),
+    readSafely(() => fs.readdir('/sys/class/pwm'), []),
+    readSafely(async () => {
+      const nets = await fs.readdir('/sys/class/net');
+      return nets.filter((n) => /^can\d+$/.test(n));
+    }, []),
+    readSafely(() => fs.readFile('/proc/dma', 'utf8').then((v) => v.trim().split('\n').map((l) => l.trim()).filter(Boolean)), []),
+    readSafely(async () => {
+      const devs = await fs.readdir('/sys/bus/iio/devices');
+      return Promise.all(devs.filter((d) => d.startsWith('iio:device')).map(async (d) => {
+        const dir = path.join('/sys/bus/iio/devices', d);
+        const [name, files] = await Promise.all([
+          readSafely(() => fs.readFile(path.join(dir, 'name'), 'utf8').then((v) => v.trim()), d),
+          readSafely(() => fs.readdir(dir), []),
+        ]);
+        return { device: d, name, channels: files.filter((f) => f.startsWith('in_')).slice(0, 8) };
+      }));
+    }, []),
+    readSafely(() => fs.readdir('/sys/class/accel'), []),
+    readSafely(() => fs.readdir('/dev/nvidia-caps'), []),
+    readSafely(() => fs.access('/dev/cpu/0/msr').then(() => 'Present (/dev/cpu/0/msr)'), null),
+  ]);
+
+  const enabledWakeDevices = wakeupText
+    .split('\n')
+    .slice(1)
+    .map((line) => line.trim())
+    .filter((line) => line.includes('*enabled'))
+    .map((line) => line.split(/\s+/)[0]);
+
+  return {
+    kernelRelease: os.release(),
+    deviceTreeModel,
+    deviceTreeCompatible,
+    secureBoot,
+    tpmVersion,
+    tpmPcrBanks,
+    ipmiPresent,
+    acpiTables,
+    chassisType,
+    boardAssetTag,
+    wakeupSources: enabledWakeDevices,
+    drmConnectors,
+    backlights,
+    audioCards: audioCardsText.trim().split('\n').map((l) => l.trim()).filter(Boolean),
+    audioCodecs,
+    usbRootHubs,
+    usbDevSpeeds,
+    thunderboltDevs,
+    cxlDevs,
+    iommuGroupCount: iommuGroups.length,
+    i2cBuses: i2cDevs,
+    spiDevices: spiDevs,
+    spiMasters,
+    uartPorts: ttyDevs,
+    gpioChips: gpioDevs,
+    watchdogDevs,
+    clocksourceCurrent: clocksourceCur,
+    clocksourceAvailable: clocksourceAvail,
+    rtcInfo,
+    pwmChips,
+    canInterfaces: canIfaces,
+    dmaChannels: dmaText,
+    iioSensors: iioDevs,
+    npuAccelerators: accelDevs,
+    migSlices: migCaps,
+    msrAccess,
+  };
+}
+
+async function readLinuxDynamicTelemetry() {
+  if (process.platform !== 'linux') return {};
+
+  const [
+    cpuidleStates, raplPkgUj, raplDramUj, coreThrottle, pkgThrottle,
+    thermalZones, coolingDevices, hwmonVoltages, powerSupplies,
+    numaNodes, thpEnabled, meminfoText, interruptsText, edacControllers,
+    blockQueues, nvmeControllers, netExtended, gpuHwmon,
+  ] = await Promise.all([
+    readSafely(async () => {
+      const states = (await fs.readdir('/sys/devices/system/cpu/cpu0/cpuidle')).filter((s) => /^state\d+$/.test(s));
+      return Promise.all(states.map(async (s) => {
+        const dir = path.join('/sys/devices/system/cpu/cpu0/cpuidle', s);
+        const [name, latency, time] = await Promise.all([
+          readSafely(() => fs.readFile(path.join(dir, 'name'), 'utf8').then((v) => v.trim()), s),
+          readSafely(() => fs.readFile(path.join(dir, 'latency'), 'utf8').then((v) => Number(v.trim())), null),
+          readSafely(() => fs.readFile(path.join(dir, 'time'), 'utf8').then((v) => Number(v.trim())), null),
+        ]);
+        return { name, latencyUs: latency, residencyUs: time };
+      }));
+    }, []),
+    readSafely(() => fs.readFile('/sys/class/powercap/intel-rapl/intel-rapl:0/energy_uj', 'utf8').then((v) => Number(v.trim())), null),
+    readSafely(() => fs.readFile('/sys/class/powercap/intel-rapl/intel-rapl:0:0/energy_uj', 'utf8').then((v) => Number(v.trim())), null),
+    readSafely(() => fs.readFile('/sys/devices/system/cpu/cpu0/thermal_throttle/core_throttle_count', 'utf8').then((v) => Number(v.trim())), null),
+    readSafely(() => fs.readFile('/sys/devices/system/cpu/cpu0/thermal_throttle/package_throttle_count', 'utf8').then((v) => Number(v.trim())), null),
+    readSafely(async () => {
+      const zones = (await fs.readdir('/sys/class/thermal')).filter((z) => /^thermal_zone\d+$/.test(z));
+      return Promise.all(zones.map(async (z) => {
+        const dir = path.join('/sys/class/thermal', z);
+        const [type, tempRaw, files] = await Promise.all([
+          readSafely(() => fs.readFile(path.join(dir, 'type'), 'utf8').then((v) => v.trim()), z),
+          readSafely(() => fs.readFile(path.join(dir, 'temp'), 'utf8').then((v) => Number(v.trim())), null),
+          readSafely(() => fs.readdir(dir), []),
+        ]);
+        const tripFiles = files.filter((f) => /^trip_point_\d+_temp$/.test(f)).slice(0, 4);
+        const trips = await Promise.all(tripFiles.map(async (tf) => {
+          const idx = tf.match(/\d+/)?.[0];
+          const [tVal, tType] = await Promise.all([
+            readSafely(() => fs.readFile(path.join(dir, tf), 'utf8').then((v) => Number(v.trim())), null),
+            readSafely(() => fs.readFile(path.join(dir, `trip_point_${idx}_type`), 'utf8').then((v) => v.trim()), null),
+          ]);
+          return Number.isFinite(tVal) && tVal > 0 ? `${tType || 'trip'}: ${(tVal / 1000).toFixed(0)} °C` : null;
+        }));
+        return { zone: z, type, tempC: Number.isFinite(tempRaw) ? Number((tempRaw / 1000).toFixed(1)) : null, trips: trips.filter(Boolean) };
+      }));
+    }, []),
+    readSafely(async () => {
+      const devs = (await fs.readdir('/sys/class/thermal')).filter((c) => /^cooling_device\d+$/.test(c)).slice(0, 12);
+      return Promise.all(devs.map(async (c) => {
+        const dir = path.join('/sys/class/thermal', c);
+        const [type, cur, max] = await Promise.all([
+          readSafely(() => fs.readFile(path.join(dir, 'type'), 'utf8').then((v) => v.trim()), c),
+          readSafely(() => fs.readFile(path.join(dir, 'cur_state'), 'utf8').then((v) => Number(v.trim())), null),
+          readSafely(() => fs.readFile(path.join(dir, 'max_state'), 'utf8').then((v) => Number(v.trim())), null),
+        ]);
+        return { device: c, type, curState: cur, maxState: max };
+      }));
+    }, []),
+    readSafely(async () => {
+      const hwmons = await fs.readdir('/sys/class/hwmon');
+      const rails = [];
+      for (const h of hwmons) {
+        const dir = path.join('/sys/class/hwmon', h);
+        const [name, files] = await Promise.all([
+          readSafely(() => fs.readFile(path.join(dir, 'name'), 'utf8').then((v) => v.trim()), h),
+          readSafely(() => fs.readdir(dir), []),
+        ]);
+        for (const f of files.filter((x) => /^in\d+_input$/.test(x)).slice(0, 6)) {
+          const mv = await readSafely(() => fs.readFile(path.join(dir, f), 'utf8').then((v) => Number(v.trim())), null);
+          if (Number.isFinite(mv)) rails.push(`${name} ${f.replace('_input', '')}: ${(mv / 1000).toFixed(3)} V`);
+        }
+      }
+      return rails;
+    }, []),
+    readSafely(async () => {
+      const supplies = await fs.readdir('/sys/class/power_supply');
+      return Promise.all(supplies.map(async (s) => {
+        const dir = path.join('/sys/class/power_supply', s);
+        const [type, online, status] = await Promise.all([
+          readSafely(() => fs.readFile(path.join(dir, 'type'), 'utf8').then((v) => v.trim()), null),
+          readSafely(() => fs.readFile(path.join(dir, 'online'), 'utf8').then((v) => v.trim()), null),
+          readSafely(() => fs.readFile(path.join(dir, 'status'), 'utf8').then((v) => v.trim()), null),
+        ]);
+        return { name: s, type, online: online === '1' ? true : online === '0' ? false : null, status };
+      }));
+    }, []),
+    readSafely(async () => {
+      const nodes = (await fs.readdir('/sys/devices/system/node')).filter((n) => /^node\d+$/.test(n));
+      return Promise.all(nodes.map(async (n) => {
+        const dir = path.join('/sys/devices/system/node', n);
+        const [cpulist, distance, numastatText] = await Promise.all([
+          readSafely(() => fs.readFile(path.join(dir, 'cpulist'), 'utf8').then((v) => v.trim()), null),
+          readSafely(() => fs.readFile(path.join(dir, 'distance'), 'utf8').then((v) => v.trim()), null),
+          readSafely(() => fs.readFile(path.join(dir, 'numastat'), 'utf8'), ''),
+        ]);
+        const statMap = Object.fromEntries(numastatText.trim().split('\n').filter(Boolean).map((l) => {
+          const [k, v] = l.trim().split(/\s+/);
+          return [k, Number(v)];
+        }));
+        return { node: n, cpulist, distance, hit: statMap.numa_hit ?? null, miss: statMap.numa_miss ?? null, foreign: statMap.numa_foreign ?? null };
+      }));
+    }, []),
+    readSafely(() => fs.readFile('/sys/kernel/mm/transparent_hugepage/enabled', 'utf8').then((v) => v.trim()), null),
+    readSafely(() => fs.readFile('/proc/meminfo', 'utf8'), ''),
+    readSafely(() => fs.readFile('/proc/interrupts', 'utf8'), ''),
+    readSafely(async () => {
+      const mcs = (await fs.readdir('/sys/devices/system/edac/mc')).filter((m) => /^mc\d+$/.test(m));
+      return Promise.all(mcs.map(async (mc) => {
+        const dir = path.join('/sys/devices/system/edac/mc', mc);
+        const [ce, ue, scrub] = await Promise.all([
+          readSafely(() => fs.readFile(path.join(dir, 'ce_count'), 'utf8').then((v) => Number(v.trim())), null),
+          readSafely(() => fs.readFile(path.join(dir, 'ue_count'), 'utf8').then((v) => Number(v.trim())), null),
+          readSafely(() => fs.readFile(path.join(dir, 'sdram_scrub_rate'), 'utf8').then((v) => v.trim()), null),
+        ]);
+        return { mc, ceCount: ce, ueCount: ue, scrubRate: scrub };
+      }));
+    }, []),
+    readSafely(async () => {
+      const blocks = (await fs.readdir('/sys/block')).filter((b) => !/^(loop|ram|zram)\d+$/.test(b));
+      return Promise.all(blocks.map(async (b) => {
+        const qDir = path.join('/sys/block', b, 'queue');
+        const [scheduler, nrRequests, rotational, physBlock, logBlock, statText] = await Promise.all([
+          readSafely(() => fs.readFile(path.join(qDir, 'scheduler'), 'utf8').then((v) => v.trim()), null),
+          readSafely(() => fs.readFile(path.join(qDir, 'nr_requests'), 'utf8').then((v) => Number(v.trim())), null),
+          readSafely(() => fs.readFile(path.join(qDir, 'rotational'), 'utf8').then((v) => Number(v.trim())), null),
+          readSafely(() => fs.readFile(path.join(qDir, 'physical_block_size'), 'utf8').then((v) => Number(v.trim())), null),
+          readSafely(() => fs.readFile(path.join(qDir, 'logical_block_size'), 'utf8').then((v) => Number(v.trim())), null),
+          readSafely(() => fs.readFile(path.join('/sys/block', b, 'stat'), 'utf8').then((v) => v.trim()), ''),
+        ]);
+        const cols = statText.split(/\s+/).map(Number);
+        const bytesRead = Number.isFinite(cols[2]) ? cols[2] * 512 : null;
+        const bytesWritten = Number.isFinite(cols[6]) ? cols[6] * 512 : null;
+        return { device: b, scheduler, queueDepth: nrRequests, rotational, physicalBlockSize: physBlock, logicalBlockSize: logBlock, bytesRead, bytesWritten };
+      }));
+    }, []),
+    readSafely(async () => {
+      const nvmes = await fs.readdir('/sys/class/nvme');
+      return Promise.all(nvmes.map(async (n) => {
+        const dir = path.join('/sys/class/nvme', n);
+        const [model, state, powerState] = await Promise.all([
+          readSafely(() => fs.readFile(path.join(dir, 'model'), 'utf8').then((v) => v.trim()), null),
+          readSafely(() => fs.readFile(path.join(dir, 'state'), 'utf8').then((v) => v.trim()), null),
+          readSafely(() => fs.readFile(path.join(dir, 'power/runtime_status'), 'utf8').then((v) => v.trim()), null),
+        ]);
+        return { controller: n, model, state, powerState };
+      }));
+    }, []),
+    readSafely(async () => {
+      const ifaces = (await fs.readdir('/sys/class/net')).filter((i) => i !== 'lo');
+      return Promise.all(ifaces.map(async (iface) => {
+        const dir = path.join('/sys/class/net', iface);
+        const [carrier, carrierChanges, txQueueLen, addrAssignType, rxFifo, txFifo, rxDropped, txDropped, sriovTotal, sriovNum, ptpDirs] = await Promise.all([
+          readSafely(() => fs.readFile(path.join(dir, 'carrier'), 'utf8').then((v) => Number(v.trim())), null),
+          readSafely(() => fs.readFile(path.join(dir, 'carrier_changes'), 'utf8').then((v) => Number(v.trim())), null),
+          readSafely(() => fs.readFile(path.join(dir, 'tx_queue_len'), 'utf8').then((v) => Number(v.trim())), null),
+          readSafely(() => fs.readFile(path.join(dir, 'addr_assign_type'), 'utf8').then((v) => Number(v.trim())), null),
+          readSafely(() => fs.readFile(path.join(dir, 'statistics/rx_fifo_errors'), 'utf8').then((v) => Number(v.trim())), null),
+          readSafely(() => fs.readFile(path.join(dir, 'statistics/tx_fifo_errors'), 'utf8').then((v) => Number(v.trim())), null),
+          readSafely(() => fs.readFile(path.join(dir, 'statistics/rx_dropped'), 'utf8').then((v) => Number(v.trim())), null),
+          readSafely(() => fs.readFile(path.join(dir, 'statistics/tx_dropped'), 'utf8').then((v) => Number(v.trim())), null),
+          readSafely(() => fs.readFile(path.join(dir, 'device/sriov_totalvfs'), 'utf8').then((v) => Number(v.trim())), null),
+          readSafely(() => fs.readFile(path.join(dir, 'device/sriov_numvfs'), 'utf8').then((v) => Number(v.trim())), null),
+          readSafely(() => fs.readdir(path.join(dir, 'device/ptp')), []),
+        ]);
+        return {
+          iface, carrier, carrierChanges, txQueueLen, addrAssignType,
+          rxFifoErrors: rxFifo, txFifoErrors: txFifo, rxDropped, txDropped,
+          sriovTotalVfs: sriovTotal, sriovNumVfs: sriovNum, ptpClocks: ptpDirs,
+        };
+      }));
+    }, []),
+    readSafely(async () => {
+      const cards = (await fs.readdir('/sys/class/drm')).filter((n) => /^card\d+$/.test(n));
+      return Promise.all(cards.map(async (card) => {
+        const devDir = path.join('/sys/class/drm', card, 'device');
+        const [vramUsed, vramTotal, hwmons] = await Promise.all([
+          readSafely(() => fs.readFile(path.join(devDir, 'mem_info_vram_used'), 'utf8').then((v) => Number(v.trim())), null),
+          readSafely(() => fs.readFile(path.join(devDir, 'mem_info_vram_total'), 'utf8').then((v) => Number(v.trim())), null),
+          readSafely(() => fs.readdir(path.join(devDir, 'hwmon')), []),
+        ]);
+        let powerWatts = null;
+        let pwm = null;
+        let fanRpm = null;
+        if (hwmons.length) {
+          const hDir = path.join(devDir, 'hwmon', hwmons[0]);
+          const [pUw, pwmVal, fanVal] = await Promise.all([
+            readSafely(() => fs.readFile(path.join(hDir, 'power1_input'), 'utf8').then((v) => Number(v.trim())), null),
+            readSafely(() => fs.readFile(path.join(hDir, 'pwm1'), 'utf8').then((v) => Number(v.trim())), null),
+            readSafely(() => fs.readFile(path.join(hDir, 'fan1_input'), 'utf8').then((v) => Number(v.trim())), null),
+          ]);
+          if (Number.isFinite(pUw)) powerWatts = Number((pUw / 1e6).toFixed(2));
+          if (Number.isFinite(pwmVal)) pwm = Math.round((pwmVal / 255) * 100);
+          if (Number.isFinite(fanVal)) fanRpm = fanVal;
+        }
+        return { card, vramUsedBytes: vramUsed, vramTotalBytes: vramTotal, powerWatts, pwmDutyPercent: pwm, fanRpm };
+      }));
+    }, []),
+  ]);
+
+  const pageTablesKb = Number(meminfoText.match(/^PageTables:\s+(\d+)/m)?.[1]);
+  const anonHugePagesKb = Number(meminfoText.match(/^AnonHugePages:\s+(\d+)/m)?.[1]);
+  const hugePagesTotal = Number(meminfoText.match(/^HugePages_Total:\s+(\d+)/m)?.[1]);
+  const hugePageSizeKb = Number(meminfoText.match(/^Hugepagesize:\s+(\d+)/m)?.[1]);
+
+  const tlbLine = interruptsText.split('\n').find((l) => l.trim().startsWith('TLB:'));
+  const tlbCounts = tlbLine ? tlbLine.trim().replace(/^TLB:\s*/, '').split(/\s+/).filter((t) => /^\d+$/.test(t)).map(Number) : [];
+  const tlbTotal = tlbCounts.length ? tlbCounts.reduce((a, b) => a + b, 0) : null;
+
+  const irqLines = interruptsText
+    .split('\n')
+    .slice(1)
+    .map((l) => l.trim())
+    .filter((l) => /^\d+:/.test(l))
+    .slice(0, 12)
+    .map((l) => {
+      const parts = l.split(/\s+/);
+      const irq = parts[0].replace(':', '');
+      const name = parts.slice(-1)[0];
+      return `IRQ ${irq} (${name})`;
+    });
+
+  return {
+    cpuidleStates,
+    raplPackageJoules: Number.isFinite(raplPkgUj) ? Number((raplPkgUj / 1e6).toFixed(2)) : null,
+    raplDramJoules: Number.isFinite(raplDramUj) ? Number((raplDramUj / 1e6).toFixed(2)) : null,
+    coreThrottleCount: coreThrottle,
+    packageThrottleCount: pkgThrottle,
+    thermalZones,
+    coolingDevices,
+    hwmonVoltages,
+    powerSupplies,
+    numaNodes,
+    thpState: thpEnabled,
+    pageTablesBytes: Number.isFinite(pageTablesKb) ? pageTablesKb * 1024 : null,
+    anonHugePagesBytes: Number.isFinite(anonHugePagesKb) ? anonHugePagesKb * 1024 : null,
+    hugePagesTotal: Number.isFinite(hugePagesTotal) ? hugePagesTotal : null,
+    hugePageSizeBytes: Number.isFinite(hugePageSizeKb) ? hugePageSizeKb * 1024 : null,
+    tlbShootdownsTotal: tlbTotal,
+    tlbShootdownsPerCpu: tlbCounts,
+    edacControllers,
+    blockQueues,
+    nvmeControllers,
+    netExtended,
+    gpuHwmon,
+    activeHardwareIrqs: irqLines,
+  };
 }
 
 function pciSysfsAddress(busAddress) {
@@ -128,14 +585,43 @@ async function readLinuxCpuInventory() {
   if (process.platform !== 'linux') return {};
   if (!cpuInventoryPromise) {
     cpuInventoryPromise = (async () => {
-      const result = await readSafely(() => execFileAsync('lscpu', ['--json'], {
-        encoding: 'utf8',
-        timeout: 3000,
-        maxBuffer: 256 * 1024,
-      }), null);
-      if (!result?.stdout) return {};
-
-      const rows = await readSafely(() => JSON.parse(result.stdout).lscpu || [], []);
+      const [ result, smtSiblings, onlineText, offlineText, vulnerabilitiesDir, baseFreq, maxFreq, minScale, maxScale, scaleDriver, boostFlag, noTurboFlag, epp, epb, pmuEventsDir ] = await Promise.all([
+        readSafely(() => execFileAsync('lscpu', ['--json'], {
+          encoding: 'utf8',
+          timeout: 3000,
+          maxBuffer: 256 * 1024,
+        }), null),
+        readSafely(async () => {
+          const cpus = (await fs.readdir('/sys/devices/system/cpu')).filter((n) => /^cpu\d+$/.test(n)).slice(0, 32);
+          const pairs = await Promise.all(cpus.map(async (c) => {
+            const sib = await readSafely(() => fs.readFile(`/sys/devices/system/cpu/${c}/topology/thread_siblings_list`, 'utf8').then((v) => v.trim()), null);
+            const cluster = await readSafely(() => fs.readFile(`/sys/devices/system/cpu/${c}/topology/cluster_id`, 'utf8').then((v) => v.trim()), null);
+            return sib ? { cpu: c, siblings: sib, cluster } : null;
+          }));
+          return pairs.filter(Boolean);
+        }, []),
+        readSafely(() => fs.readFile('/sys/devices/system/cpu/online', 'utf8').then((v) => v.trim()), null),
+        readSafely(() => fs.readFile('/sys/devices/system/cpu/offline', 'utf8').then((v) => v.trim()), null),
+        readSafely(async () => {
+          const files = await fs.readdir('/sys/devices/system/cpu/vulnerabilities');
+          const entries = await Promise.all(files.slice(0, 16).map(async (f) => {
+            const text = await readSafely(() => fs.readFile(`/sys/devices/system/cpu/vulnerabilities/${f}`, 'utf8').then((v) => v.trim()), null);
+            return text ? `${f}: ${text}` : null;
+          }));
+          return entries.filter(Boolean);
+        }, []),
+        readSafely(() => fs.readFile('/sys/devices/system/cpu/cpu0/cpufreq/base_frequency', 'utf8').then((v) => Number(v.trim()) / 1000), null),
+        readSafely(() => fs.readFile('/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq', 'utf8').then((v) => Number(v.trim()) / 1000), null),
+        readSafely(() => fs.readFile('/sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq', 'utf8').then((v) => Number(v.trim()) / 1000), null),
+        readSafely(() => fs.readFile('/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq', 'utf8').then((v) => Number(v.trim()) / 1000), null),
+        readSafely(() => fs.readFile('/sys/devices/system/cpu/cpu0/cpufreq/scaling_driver', 'utf8').then((v) => v.trim()), null),
+        readSafely(() => fs.readFile('/sys/devices/system/cpu/cpufreq/boost', 'utf8').then((v) => v.trim()), null),
+        readSafely(() => fs.readFile('/sys/devices/system/cpu/intel_pstate/no_turbo', 'utf8').then((v) => v.trim()), null),
+        readSafely(() => fs.readFile('/sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference', 'utf8').then((v) => v.trim()), null),
+        readSafely(() => fs.readFile('/sys/devices/system/cpu/cpu0/power/energy_perf_bias', 'utf8').then((v) => v.trim()), null),
+        readSafely(() => fs.readdir('/sys/bus/event_source/devices/cpu/events'), []),
+      ]);
+      const rows = result?.stdout ? await readSafely(() => JSON.parse(result.stdout).lscpu || [], []) : [];
       const values = new Map(rows.map(({ field, data }) => [field.replace(/:$/, '').trim(), String(data || '').trim()]));
       const number = (field) => {
         const parsed = Number.parseFloat((values.get(field) || '').replace(/,/g, ''));
@@ -171,6 +657,18 @@ async function readLinuxCpuInventory() {
           node: field.match(/\d+/)?.[0] ?? null,
           cpus: String(data || '').trim(),
         })),
+        smtSiblings,
+        onlineCpus: onlineText,
+        offlineCpus: offlineText || 'None (all cores online)',
+        vulnerabilities: vulnerabilitiesDir,
+        baseFrequencyMhz: Number.isFinite(baseFreq) && baseFreq > 0 ? baseFreq : null,
+        boostFrequencyMhz: Number.isFinite(maxFreq) && maxFreq > 0 ? maxFreq : null,
+        scalingMinMhz: Number.isFinite(minScale) && minScale > 0 ? minScale : null,
+        scalingMaxMhz: Number.isFinite(maxScale) && maxScale > 0 ? maxScale : null,
+        scalingDriver: scaleDriver,
+        boostEnabled: boostFlag != null ? boostFlag === '1' : noTurboFlag != null ? noTurboFlag === '0' : null,
+        energyPreference: epp || (epb != null ? `EPB ${epb}` : null),
+        pmuEvents: pmuEventsDir,
       };
     })();
   }
@@ -301,12 +799,13 @@ async function readLinuxApplications() {
 async function getStaticInventory() {
   if (!staticInventoryPromise) {
     staticInventoryPromise = (async () => {
-      const [diskLayout, blockDevices, networkInterfaces, usbDevices, pciDevices] = await Promise.all([
+      const [diskLayout, blockDevices, networkInterfaces, usbDevices, pciDevices, staticTelemetry] = await Promise.all([
         readSafely(() => systemInformation.diskLayout(), []),
         readSafely(() => systemInformation.blockDevices(), []),
         readSafely(() => systemInformation.networkInterfaces(), []),
         readSafely(() => systemInformation.usb(), []),
         readLinuxPciDevices(),
+        readLinuxStaticTelemetry(),
       ]);
 
       return {
@@ -319,12 +818,13 @@ async function getStaticInventory() {
           ])),
         },
         network: networkInterfaces.map((network) => pick(network, [
-          'type', 'default', 'operstate', 'duplex', 'speed', 'mtu', 'internal', 'virtual',
+          'iface', 'type', 'default', 'operstate', 'duplex', 'speed', 'mtu', 'internal', 'virtual',
         ])),
         usb: usbDevices.map((device) => pick(device, [
           'bus', 'name', 'type', 'manufacturer', 'vendor', 'removable', 'maxPower',
         ])),
         pci: pciDevices.filter((device) => device.vendorId || device.deviceId),
+        staticTelemetry,
       };
     })();
   }
@@ -333,7 +833,7 @@ async function getStaticInventory() {
 }
 
 async function getHardwareSnapshot() {
-  const [cpu, currentSpeed, currentLoad, temperature, memory, memoryLayout, graphics, system, baseboard, bios, osInfo, inventory, networkStats, battery, fanSpeeds, cpuInfo, filesystems, storageIO, bootMode, cpuInventory, cacheTopology, gpuClocks, applications] = await Promise.all([
+  const [cpu, currentSpeed, currentLoad, temperature, memory, memoryLayout, graphics, system, baseboard, bios, osInfo, inventory, networkStats, battery, fanSpeeds, cpuInfo, filesystems, storageIO, bootMode, cpuInventory, cacheTopology, gpuClocks, applications, dynamicTelemetry] = await Promise.all([
     readSafely(() => systemInformation.cpu(), {}),
     readSafely(() => systemInformation.cpuCurrentSpeed(), {}),
     readSafely(() => systemInformation.currentLoad(), {}),
@@ -359,6 +859,7 @@ async function getHardwareSnapshot() {
     readLinuxCacheTopology(),
     readLinuxGpuClocks(),
     readLinuxApplications(),
+    readLinuxDynamicTelemetry(),
   ]);
   const microcodeRevision = cpuInfo.match(/^microcode\s*:\s*(.+)$/m)?.[1]?.trim() ?? null;
   const cpuId = decodeDisplayedCpuId(cpu.family, cpu.model);
@@ -501,6 +1002,7 @@ async function getHardwareSnapshot() {
     sensors: {
       fans: fanSpeeds,
     },
+    dynamicTelemetry,
   };
 }
 

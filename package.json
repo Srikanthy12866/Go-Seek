@@ -21,7 +21,7 @@
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
-    "desktop": "concurrently -k -n ui,desktop \"cross-env BROWSER=none react-scripts start\" \"wait-on http://localhost:3000 && cross-env ELECTRON_START_URL=http://localhost:3000 electron .\"",
+    "desktop": "concurrently -k -n ui,desktop \"cross-env BROWSER=none react-scripts start\" \"wait-on http://localhost:3000 && cross-env ELECTRON_RUN_AS_NODE= ELECTRON_START_URL=http://localhost:3000 electron . --no-sandbox\"",
     "desktop:build": "npm run build && electron-builder",
     "desktop:linux-arm64": "npm run build && electron-builder --linux AppImage deb --arm64",
     "eject": "react-scripts eject"

@@ -14,10 +14,12 @@ const routeByRoot = {
   pci: '/devices',
   sensors: '/compute',
   soc: '/compute',
+  staticTelemetry: '/board',
   storage: '/storage',
   storageIO: '/storage',
   system: '/board',
   usb: '/devices',
+  dynamicTelemetry: '/compute',
 };
 
 const hiddenKeys = new Set(['capturedAt', 'updatedAt', 'userAgent']);

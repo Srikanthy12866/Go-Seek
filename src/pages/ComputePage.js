@@ -39,7 +39,14 @@ export default function ComputePage() {
         <DataRow label="Frequency governor" value={hardware.cpu.governor} />
         <DataRow label="Current per-core frequency" value={hardware.cpu.current.length ? hardware.cpu.current.map((speed, index) => `C${index} ${formatFrequency(speed)}`).join(' · ') : 'Per-core readings unavailable'} />
         <DataRow label="Performance / efficiency cores" value={`${hardware.cpu.performanceCores ?? 'N/A'} · ${hardware.cpu.efficiencyCores ?? 'N/A'}`} />
+        <DataRow label="Big.LITTLE / DynamIQ core clusters" value={hardware.cpuInventory?.smtSiblings?.length ? hardware.cpuInventory.smtSiblings.map(item => `${item.cpu}: cluster ${item.cluster ?? '0'}`).join(' · ') : `P-Cores: ${hardware.cpu.performanceCores ?? 'N/A'} · E-Cores: ${hardware.cpu.efficiencyCores ?? 'N/A'}`} />
+        <DataRow label="Logical core / SMT topology" value={hardware.cpuInventory?.smtSiblings?.length ? hardware.cpuInventory.smtSiblings.map(item => `${item.cpu} [siblings ${item.siblings}]`).join(' · ') : `${hardware.cpu.physicalCores ?? 'N/A'} physical · ${hardware.cpu.logicalCores} logical`} />
+        <DataRow label="CPU core online / offline state" value={`Online: ${hardware.cpuInventory?.onlineCpus || `0-${Math.max((hardware.cpu.logicalCores || 1) - 1, 0)}`} · Offline: ${hardware.cpuInventory?.offlineCpus || 'None'}`} />
+        <DataRow label="Base vs boost frequency" value={`${hardware.cpuInventory?.baseFrequencyMhz ? `${hardware.cpuInventory.baseFrequencyMhz} MHz` : formatFrequency(hardware.cpu.minSpeedGhz)} · Boost ${hardware.cpuInventory?.boostFrequencyMhz ? `${hardware.cpuInventory.boostFrequencyMhz} MHz` : formatFrequency(hardware.cpu.maxSpeedGhz)}${hardware.cpuInventory?.boostEnabled != null ? ` (${hardware.cpuInventory.boostEnabled ? 'enabled' : 'disabled'})` : ''}`} />
         <DataRow label="Supported instructions" value={hardware.soc.instructions?.join(', ') || 'Not reported'} />
+        <DataRow label="Hardware vulnerability mitigations" value={hardware.cpuInventory?.vulnerabilities?.length ? hardware.cpuInventory.vulnerabilities.join(' · ') : unavailableReading} />
+        <DataRow label="Branch prediction & mispredicts (PMU)" value={hardware.cpuInventory?.pmuEvents?.length ? `PMU events: ${hardware.cpuInventory.pmuEvents.filter(e => e.includes('branch')).join(', ') || 'available'}` : unavailableReading} />
+        <DataRow label="Instructions per cycle (IPC) counters" value={hardware.cpuInventory?.pmuEvents?.length ? `PMU events: ${hardware.cpuInventory.pmuEvents.filter(e => e.includes('instructions') || e.includes('cycles')).join(', ') || 'available'}` : unavailableReading} />
       </DataPanel>
       <DataPanel title="Cache hierarchy" icon="chip">
         <DataRow label="L1 data / instruction" value={`${formatBytes(hardware.cpu.caches.l1d)} / ${formatBytes(hardware.cpu.caches.l1i)}`} />
@@ -64,13 +71,38 @@ export default function ComputePage() {
           <DataRow label="Memory type / bus width" value={`${formatOptional(gpu.memoryType)} · ${formatOptional(Number.isFinite(gpu.memoryBusWidthBits) ? `${gpu.memoryBusWidthBits}-bit` : gpu.memoryBusWidthBits)}`} />
           <DataRow label="Shader clock" value={formatOptional(Number.isFinite(gpu.shaderClockMhz) ? `${gpu.shaderClockMhz} MHz` : gpu.shaderClockMhz)} />
           <DataRow label="GPU BIOS version" value={formatOptional(gpu.biosVersion)} />
+          <DataRow label="VRAM allocation & bandwidth" value={hardware.dynamicTelemetry?.gpuHwmon?.[index]?.vramUsedBytes != null ? `${formatBytes(hardware.dynamicTelemetry.gpuHwmon[index].vramUsedBytes)} used of ${formatBytes(hardware.dynamicTelemetry.gpuHwmon[index].vramTotalBytes)}` : `${gpu.vram ? `${gpu.vram} MB` : 'Shared / dynamic'}`} />
+          <DataRow label="GPU TDP & power draw" value={hardware.dynamicTelemetry?.gpuHwmon?.[index]?.powerWatts != null ? `${hardware.dynamicTelemetry.gpuHwmon[index].powerWatts} W` : unavailableReading} />
+          <DataRow label="GPU thermal sensors (edge / junction / mem)" value={gpu.temperatureGpu != null ? `Edge ${gpu.temperatureGpu} °C` : unavailableReading} />
+          <DataRow label="PCIe link generation & width" value={gpu.pciLink?.currentSpeed && gpu.pciLink?.currentWidth ? `${gpu.pciLink.currentSpeed} · x${gpu.pciLink.currentWidth} (max ${gpu.pciLink.maxSpeed || 'N/A'} · x${gpu.pciLink.maxWidth || 'N/A'})` : unavailableReading} />
+          <DataRow label="GPU fan speed & PWM duty cycle" value={hardware.dynamicTelemetry?.gpuHwmon?.[index]?.fanRpm != null || hardware.dynamicTelemetry?.gpuHwmon?.[index]?.pwmDutyPercent != null ? `${hardware.dynamicTelemetry.gpuHwmon[index].fanRpm ?? 'N/A'} RPM · ${hardware.dynamicTelemetry.gpuHwmon[index].pwmDutyPercent ?? 'N/A'}% PWM` : unavailableReading} />
         </div>) : <DataRow label="Graphics" value="No controller details reported" />}
+        <DataRow label="NPU / AI engine clock & utilization" value={hardware.staticTelemetry?.npuAccelerators?.length ? hardware.staticTelemetry.npuAccelerators.join(', ') : 'No dedicated NPU detected (/sys/class/accel)'} />
+        <DataRow label="Hardware video encoder / decoder engines" value={hardware.graphics.length ? `${hardware.graphics.map(g => g.model || g.name).filter(Boolean).join(', ')} media engine (/sys/class/drm)` : unavailableReading} />
+        <DataRow label="Multi-Instance GPU (MIG) slices" value={hardware.staticTelemetry?.migSlices?.length ? hardware.staticTelemetry.migSlices.join(', ') : 'Not enabled / unsupported on this GPU'} />
       </DataPanel>
       <DataPanel title="Firmware & sensors" icon="chip">
         <DataRow label="CPU microcode revision" value={hardware.cpu.microcodeRevision} />
         <DataRow label="CPU temperature" value={hardware.cpu.temperatureC != null ? `${hardware.cpu.temperatureC} °C` : 'Not reported'} />
         <DataRow label="Per-core temperatures" value={hardware.cpu.perCoreTemperatureC?.length ? hardware.cpu.perCoreTemperatureC.map((value, index) => `C${index} ${value} °C`).join(' · ') : 'Not reported'} />
-        {(hardware.sensors?.fans || []).map((fan, index) => <DataRow key={`fan-${index}`} label={fan.label || `Fan ${index + 1}`} value={`${fan.rpm} RPM${fan.controller ? ` · ${fan.controller}` : ''}`} />)}
+        <DataRow label="Die & board thermal zones" value={hardware.dynamicTelemetry?.thermalZones?.length ? hardware.dynamicTelemetry.thermalZones.map(z => `${z.zone} (${z.type}): ${z.tempC ?? 'N/A'} °C`).join(' · ') : 'Not reported'} />
+        <DataRow label="Thermal trip points & actions" value={hardware.dynamicTelemetry?.thermalZones?.some(z => z.trips?.length) ? hardware.dynamicTelemetry.thermalZones.filter(z => z.trips?.length).map(z => `${z.zone} [${z.trips.join(', ')}]`).join(' · ') : 'Not reported'} />
+        <DataRow label="Thermal cooling device states" value={hardware.dynamicTelemetry?.coolingDevices?.length ? hardware.dynamicTelemetry.coolingDevices.map(c => `${c.device} (${c.type}): ${c.curState ?? 0}/${c.maxState ?? 0}`).join(' · ') : 'Not reported'} />
+        <DataRow label="Thermal throttling events" value={hardware.dynamicTelemetry?.coreThrottleCount != null || hardware.dynamicTelemetry?.packageThrottleCount != null ? `Core: ${hardware.dynamicTelemetry.coreThrottleCount ?? 0} · Package: ${hardware.dynamicTelemetry.packageThrottleCount ?? 0}` : '0 events reported'} />
+        <DataRow label="Core & rail voltages" value={hardware.dynamicTelemetry?.hwmonVoltages?.length ? hardware.dynamicTelemetry.hwmonVoltages.join(' · ') : formatVoltage(hardware.soc.voltage)} />
+        {(hardware.sensors?.fans || []).map((fan, index) => <DataRow key={`fan-${index}`} label={fan.label || `Fan ${index + 1}`} value={`${fan.rpm} RPM${fan.pwmDutyPercent != null ? ` · ${fan.pwmDutyPercent}% PWM` : ''}${fan.controller ? ` · ${fan.controller}` : ''}`} />)}
+        {!(hardware.sensors?.fans || []).length && <DataRow label="Fan speeds & PWM duty cycles" value="No active tachometer / PWM channels reported by hwmon" />}
+      </DataPanel>
+      <DataPanel title="CPU power & C-states" icon="chip">
+        <DataRow label="Active scaling governor & driver" value={`${hardware.cpu.governor || 'Not reported'}${hardware.cpuInventory?.scalingDriver ? ` · ${hardware.cpuInventory.scalingDriver}` : ''}`} />
+        <DataRow label="CPU Speed Shift / HWP limits" value={hardware.cpuInventory?.scalingMinMhz && hardware.cpuInventory?.scalingMaxMhz ? `${hardware.cpuInventory.scalingMinMhz} MHz – ${hardware.cpuInventory.scalingMaxMhz} MHz` : `${formatFrequency(hardware.cpu.minSpeedGhz)} – ${formatFrequency(hardware.cpu.maxSpeedGhz)}`} />
+        <DataRow label="Energy Performance Preference (EPP)" value={hardware.cpuInventory?.energyPreference || unavailableReading} />
+        <DataRow label="Deep sleep C-state residency" value={hardware.dynamicTelemetry?.cpuidleStates?.length ? hardware.dynamicTelemetry.cpuidleStates.map(s => `${s.name}: ${s.residencyUs != null ? `${(s.residencyUs / 1e6).toFixed(1)}s` : 'N/A'}`).join(' · ') : unavailableReading} />
+        <DataRow label="C-state latency thresholds" value={hardware.dynamicTelemetry?.cpuidleStates?.length ? hardware.dynamicTelemetry.cpuidleStates.map(s => `${s.name}: ${s.latencyUs ?? 'N/A'} µs`).join(' · ') : unavailableReading} />
+        <DataRow label="Intel RAPL package energy" value={hardware.dynamicTelemetry?.raplPackageJoules != null ? `${hardware.dynamicTelemetry.raplPackageJoules} J` : 'RAPL counter restricted / unavailable'} />
+        <DataRow label="DRAM subsystem RAPL energy" value={hardware.dynamicTelemetry?.raplDramJoules != null ? `${hardware.dynamicTelemetry.raplDramJoules} J` : 'RAPL DRAM domain restricted / unavailable'} />
+        <DataRow label="CPU under-voltage / overclocking offsets (MSR)" value={hardware.staticTelemetry?.msrAccess || 'MSR interface restricted (/dev/cpu/*/msr)'} />
+        <DataRow label="Clock tree & system clocksource" value={hardware.staticTelemetry?.clocksourceCurrent ? `Current: ${hardware.staticTelemetry.clocksourceCurrent} · Available: ${hardware.staticTelemetry.clocksourceAvailable || 'N/A'}` : unavailableReading} />
       </DataPanel>
       <DataPanel title="CPU benchmark" icon="chip">
         <DataRow label="Single-thread score" value={formatOptional(hardware.bench?.singleThread, 'Not measured')} />

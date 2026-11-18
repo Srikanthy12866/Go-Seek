@@ -41,5 +41,16 @@ export default function MemoryPage() {
         <DataRow label="XMP / EXPO profiles" value={formatOptional(module.xmpProfiles)} />
       </div>) : <DataRow label="SPD module data" value="Not exposed by this OS or permission level" />}
     </DataPanel>
+    <DataPanel title="NUMA, paging & ECC telemetry" icon="chip">
+      <DataRow label="NUMA node topography" value={hardware.dynamicTelemetry?.numaNodes?.length ? hardware.dynamicTelemetry.numaNodes.map(n => `${n.node}: CPUs ${n.cpulist || 'N/A'}`).join(' · ') : 'Single-node / not reported'} />
+      <DataRow label="NUMA distance / latency matrix" value={hardware.dynamicTelemetry?.numaNodes?.length ? hardware.dynamicTelemetry.numaNodes.map(n => `${n.node}: [${n.distance || '10'}]`).join(' · ') : 'Not reported'} />
+      <DataRow label="NUMA memory hit / miss ratio" value={hardware.dynamicTelemetry?.numaNodes?.length ? hardware.dynamicTelemetry.numaNodes.map(n => `${n.node}: ${n.hit ?? 0} hits / ${n.miss ?? 0} misses / ${n.foreign ?? 0} foreign`).join(' · ') : 'Not reported'} />
+      <DataRow label="Transparent HugePages (THP) state" value={hardware.dynamicTelemetry?.thpState || 'Not reported'} />
+      <DataRow label="Page table footprint" value={hardware.dynamicTelemetry?.pageTablesBytes != null ? `${formatBytes(hardware.dynamicTelemetry.pageTablesBytes)} · AnonHugePages ${formatBytes(hardware.dynamicTelemetry.anonHugePagesBytes || 0)}` : 'Not reported'} />
+      <DataRow label="HugePages pool & size" value={hardware.dynamicTelemetry?.hugePageSizeBytes != null ? `${hardware.dynamicTelemetry.hugePagesTotal ?? 0} pages × ${formatBytes(hardware.dynamicTelemetry.hugePageSizeBytes)}` : 'Not reported'} />
+      <DataRow label="TLB flush rates & remote IPIs" value={hardware.dynamicTelemetry?.tlbShootdownsTotal != null ? `${hardware.dynamicTelemetry.tlbShootdownsTotal.toLocaleString()} total shootdowns (${hardware.dynamicTelemetry.tlbShootdownsPerCpu.map((c, i) => `C${i}: ${c}`).join(' · ')})` : 'Not reported'} />
+      <DataRow label="Hardware memory scrubbing rate" value={hardware.dynamicTelemetry?.edacControllers?.length ? hardware.dynamicTelemetry.edacControllers.map(m => `${m.mc}: ${m.scrubRate || 'N/A'}`).join(' · ') : 'No EDAC memory controller active'} />
+      <DataRow label="Uncorrected / corrected ECC error count" value={hardware.dynamicTelemetry?.edacControllers?.length ? hardware.dynamicTelemetry.edacControllers.map(m => `${m.mc}: UE ${m.ueCount ?? 0} · CE ${m.ceCount ?? 0}`).join(' · ') : '0 errors (EDAC inactive or non-ECC RAM)'} />
+    </DataPanel>
   </div>;
 }

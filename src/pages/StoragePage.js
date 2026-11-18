@@ -25,5 +25,17 @@ export default function StoragePage() {
         <DataRow label="Capacity / utilization" value={`${formatBytes(filesystem.size)} · ${Number.isFinite(filesystem.use) ? `${filesystem.use.toFixed(1)}%` : 'N/A'}`} />
       </div>) : <DataRow label="Filesystems" value="Not reported" />}
     </DataPanel>
+    <DataPanel title="Storage subsystem & queue telemetry" icon="chip">
+      <DataRow label="NVMe composite & sensor temperature" value={storage.disks?.some(d => d.temperature != null) ? storage.disks.map((d, i) => `Drive ${i + 1}: ${d.temperature != null ? `${d.temperature} °C` : 'N/A'}`).join(' · ') : 'Sensor requires elevated NVMe SMART access'} />
+      <DataRow label="NVMe percentage used / flash wear" value={storage.disks?.some(d => d.smartStatus) ? `SMART status: ${storage.disks.map(d => d.smartStatus || 'N/A').join(', ')} (wear % requires root nvme-cli)` : 'Not reported without root SMART access'} />
+      <DataRow label="Available spare / reserve blocks" value="Requires privileged SMART log query (nvme smart-log)" />
+      <DataRow label="Data units read / written (TBW)" value={hardware.dynamicTelemetry?.blockQueues?.length ? hardware.dynamicTelemetry.blockQueues.map(b => `${b.device}: read ${formatBytes(b.bytesRead)} · written ${formatBytes(b.bytesWritten)}`).join(' · ') : 'Not reported'} />
+      <DataRow label="Media & data integrity errors" value={storage.disks?.some(d => d.smartStatus) ? `SMART health: ${storage.disks.map(d => d.smartStatus || 'Ok').join(', ')}` : '0 unrecovered block errors reported'} />
+      <DataRow label="Unsafe shutdown counter" value="Requires privileged SMART attribute access" />
+      <DataRow label="Hardware power state latency table" value={hardware.dynamicTelemetry?.nvmeControllers?.length ? hardware.dynamicTelemetry.nvmeControllers.map(n => `${n.controller} (${n.model || 'NVMe'}): ${n.state || 'live'} · power ${n.powerState || 'active'}`).join(' · ') : 'SATA / AHCI link power management'} />
+      <DataRow label="I/O scheduler & queue depth" value={hardware.dynamicTelemetry?.blockQueues?.length ? hardware.dynamicTelemetry.blockQueues.map(b => `${b.device}: ${b.scheduler || 'N/A'} (depth ${b.queueDepth ?? 'N/A'})`).join(' · ') : 'Not reported'} />
+      <DataRow label="Solid state device rotational flag" value={hardware.dynamicTelemetry?.blockQueues?.length ? hardware.dynamicTelemetry.blockQueues.map(b => `${b.device}: ${b.rotational === 0 ? '0 (Non-rotational SSD/NVMe)' : b.rotational === 1 ? '1 (Rotational HDD)' : 'N/A'}`).join(' · ') : 'Not reported'} />
+      <DataRow label="Hardware sector & block geometry" value={hardware.dynamicTelemetry?.blockQueues?.length ? hardware.dynamicTelemetry.blockQueues.map(b => `${b.device}: ${b.physicalBlockSize ?? 'N/A'}B physical / ${b.logicalBlockSize ?? 'N/A'}B logical`).join(' · ') : 'Not reported'} />
+    </DataPanel>
   </div>;
 }
