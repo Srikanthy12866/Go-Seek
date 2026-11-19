@@ -48,9 +48,10 @@ export function HardwareProvider({ children }) {
     if (hardware?.runtime !== 'desktop') return;
     const sample = {
       capturedAt: hardware.capturedAt,
-      frequency: hardware.cpu.averageSpeedGhz,
+      frequency: hardware.cpu?.averageSpeedGhz ?? 0,
+      utilization: hardware.cpu?.utilizationPercent ?? 0,
     };
-    if (!Number.isFinite(sample.frequency) || sample.frequency <= 0) return;
+    if (!Number.isFinite(sample.capturedAt)) return;
 
     setFrequencyHistory(current => {
       if (current[current.length - 1]?.capturedAt === sample.capturedAt) return current;

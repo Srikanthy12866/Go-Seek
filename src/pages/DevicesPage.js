@@ -24,7 +24,7 @@ export default function DevicesPage() {
       {pci.length ? pci.slice(0, 20).map((device, index) => <div key={`pci-${index}`}>
         <DataRow label={`PCI device ${index + 1}`} value={`${device.vendorId || 'Vendor n/a'} · ${device.deviceId || 'Device n/a'}`} mono />
         <DataRow label="Class / subsystem" value={`${device.classCode || 'N/A'} · ${device.subsystemVendorId || 'N/A'}:${device.subsystemDeviceId || 'N/A'}`} mono />
-      </div>) : <DataRow label="PCI inventory" value="Linux PCI sysfs information unavailable" />}
+      </div>) : <DataRow label="PCI inventory" value="PCI hardware devices not reported by OS" />}
       <DataRow label="Battery" value={battery.hasBattery ? `${battery.percent ?? 'N/A'}%${battery.isCharging ? ' · charging' : ''}` : 'No battery reported'} />
       <DataRow label="Battery capacity" value={battery.hasBattery ? `${battery.currentCapacity ?? 'N/A'} / ${battery.maxCapacity ?? 'N/A'} ${battery.capacityUnit || ''}` : 'Not applicable'} />
       <DataRow label="Power source" value={battery.acConnected == null ? 'Not reported' : battery.acConnected ? 'AC connected' : 'Battery'} />

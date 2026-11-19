@@ -9,7 +9,7 @@ export default function ApplicationsPage() {
 
   const applications = hardware.applications || [];
   return <DataPanel title="Current user applications" icon="grid" className="application-panel">
-    {!hardware.applicationsSupported ? <p className="application-empty">Application process monitoring is currently available on Linux desktop.</p> : applications.length ? <>
+    {!hardware.applicationsSupported ? <p className="application-empty">Application process monitoring is currently unavailable on this platform.</p> : applications.length ? <>
       <div className="application-process-heading"><span>APPLICATION / PROCESS</span><span>CPU</span><span>MEMORY</span></div>
       <div className="application-process-list">{applications.map((application) => {
         const cpuPercent = Number.isFinite(application.cpuPercent) ? Math.max(application.cpuPercent, 0) : null;
