@@ -1,42 +1,55 @@
+import { useEffect, useState } from 'react';
 import { DataPanel } from '../components/HardwareUI';
 import ComputeDashboard from '../components/ComputeDashboard';
 import { useHardware } from '../context/HardwareContext';
 import { formatMemoryBytes, formatRate, sumRates } from '../lib/formatters';
+import { fetchOverviewData } from '../services/overviewService';
 
 export default function OverviewPage() {
   const { hardware, frequencyHistory } = useHardware();
-  if (!hardware) return null;
+  const [menuData, setMenuData] = useState(null);
 
-  if (hardware.runtime !== 'desktop') {
+  useEffect(() => {
+    let mounted = true;
+    fetchOverviewData().then((data) => {
+      if (mounted && data) setMenuData(data);
+    });
+    return () => { mounted = false; };
+  }, []);
+
+  const activeHardware = menuData ? { ...hardware, ...menuData } : hardware;
+  if (!activeHardware) return null;
+
+  if (activeHardware.runtime !== 'desktop') {
     return <div className="panel-grid">
       <DataPanel title="Browser snapshot" icon="globe">
-        <div className="data-row"><span>Browser</span><strong>{hardware.browser}</strong></div>
-        <div className="data-row"><span>Operating system</span><strong>{hardware.operatingSystem}</strong></div>
-        <div className="data-row"><span>Logical processors</span><strong>{hardware.cpuThreads}</strong></div>
+        <div className="data-row"><span>Browser</span><strong>{activeHardware.browser}</strong></div>
+        <div className="data-row"><span>Operating system</span><strong>{activeHardware.operatingSystem}</strong></div>
+        <div className="data-row"><span>Logical processors</span><strong>{activeHardware.cpuThreads}</strong></div>
       </DataPanel>
       <DataPanel title="Display & network" icon="display">
-        <div className="data-row"><span>Screen</span><strong>{hardware.screen}</strong></div>
-        <div className="data-row"><span>Connection</span><strong>{hardware.networkStatus} · {hardware.networkType}</strong></div>
-        <div className="data-row"><span>Graphics</span><strong>{hardware.graphics}</strong></div>
+        <div className="data-row"><span>Screen</span><strong>{activeHardware.screen}</strong></div>
+        <div className="data-row"><span>Connection</span><strong>{activeHardware.networkStatus} · {activeHardware.networkType}</strong></div>
+        <div className="data-row"><span>Graphics</span><strong>{typeof activeHardware.graphics === 'string' ? activeHardware.graphics : (Array.isArray(activeHardware.graphics) ? activeHardware.graphics[0]?.model || 'Graphics adapter' : 'Integrated graphics')}</strong></div>
       </DataPanel>
     </div>;
   }
 
-  const totalMemory = hardware.memory.totalBytes;
-  const availableMemory = hardware.memory.availableBytes;
+  const totalMemory = activeHardware.memory?.totalBytes;
+  const availableMemory = activeHardware.memory?.availableBytes;
   const hasMemoryData = Number.isFinite(totalMemory) && totalMemory > 0 && Number.isFinite(availableMemory);
   const usedMemory = hasMemoryData ? Math.max(totalMemory - availableMemory, 0) : null;
   const usedPercent = hasMemoryData ? Math.max(0, Math.min((usedMemory / totalMemory) * 100, 100)) : null;
-  const network = (hardware.network || []).filter(item => !item.internal && !item.virtual);
+  const network = (activeHardware.network || []).filter(item => !item.internal && !item.virtual);
   const activeLinks = network.filter(item => item.operstate === 'up').length;
-  const receiveRate = sumRates(hardware.networkTraffic || [], 'rx_sec');
-  const transmitRate = sumRates(hardware.networkTraffic || [], 'tx_sec');
-  const storageReadRate = hardware.storageIO?.readBytesPerSecond;
-  const storageWriteRate = hardware.storageIO?.writeBytesPerSecond;
+  const receiveRate = sumRates(activeHardware.networkTraffic || [], 'rx_sec');
+  const transmitRate = sumRates(activeHardware.networkTraffic || [], 'tx_sec');
+  const storageReadRate = activeHardware.storageIO?.readBytesPerSecond;
+  const storageWriteRate = activeHardware.storageIO?.writeBytesPerSecond;
   const maxStorageRate = Math.max(storageReadRate || 0, storageWriteRate || 0, 1);
 
   return <div className="overview-dashboard">
-    <ComputeDashboard hardware={hardware} history={frequencyHistory} compact />
+    <ComputeDashboard hardware={activeHardware} history={frequencyHistory} compact />
     <DataPanel title="Memory usage" icon="chip">
       <div className="memory-dashboard">
         <div className="memory-dashboard-heading"><strong>{formatMemoryBytes(usedMemory)}</strong><span>used of {formatMemoryBytes(totalMemory)}</span></div>

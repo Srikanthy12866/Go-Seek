@@ -7,12 +7,12 @@ export default function ComputeDashboard({ hardware, history = [], compact = fal
   const cpu = hardware.cpu;
   const frequencies = cpu.current || [];
   const utilization = cpu.perCoreUtilizationPercent || [];
-  const samples = history.filter(sample => sample && Number.isFinite(sample.capturedAt));
-
   const isUtil = chartMode === 'utilization';
-  const maxFrequency = Math.max(cpu.maxSpeedGhz || 0, ...frequencies.filter(Number.isFinite), ...samples.map(s => s.frequency || 0), 1);
 
-  // Generate SVG chart coordinates
+  // For frequency chart, filter positive samples
+  const samples = history.filter(sample => sample && Number.isFinite(sample.capturedAt));
+  const maxFrequency = Math.max(cpu.maxSpeedGhz || 0, ...frequencies.filter(Number.isFinite), ...samples.map(sample => sample.frequency || 0), 1);
+
   const points = samples.map((sample, index) => {
     const x = samples.length === 1 ? 250 : 12 + (index / (samples.length - 1)) * 476;
     const val = isUtil
@@ -41,36 +41,18 @@ export default function ComputeDashboard({ hardware, history = [], compact = fal
   const gradientId = isUtil ? 'util-gradient' : 'freq-gradient';
 
   return (
-    <DataPanel title="CPU Performance & Telemetry" icon="chip">
+    <DataPanel title="CPU frequency & utilization" icon="chip">
       <div className="compute-dashboard">
-        {/* Hardware Specs & Live Summary Bar */}
         <div className="compute-metrics">
-          <div>
-            <span>% Utilization</span>
-            <strong style={{ color: '#10b981' }}>{formatPercent(cpu.utilizationPercent)}</strong>
-          </div>
-          <div>
-            <span>Clock Frequency</span>
-            <strong style={{ color: '#38bdf8' }}>{formatFrequency(cpu.averageSpeedGhz)}</strong>
-          </div>
-          <div>
-            <span>Base / Boost</span>
-            <strong style={{ color: '#f8fafc', fontSize: '14px', marginTop: '4px' }}>
-              {hardware.soc.name ? hardware.soc.name.replace(/CPU\s*@.*$/i, '').trim() : 'Intel Core'}
-            </strong>
-          </div>
+          <div><span>Average clock</span><strong>{formatFrequency(cpu.averageSpeedGhz)}</strong></div>
+          <div><span>CPU utilization</span><strong>{formatPercent(cpu.utilizationPercent)}</strong></div>
+          <div><span>Rated maximum</span><strong>{formatFrequency(cpu.maxSpeedGhz)}</strong></div>
         </div>
-
-        {/* Real-Time Waveform Graph (Task Manager Style) */}
         <div className="frequency-chart">
           <div className="frequency-chart-heading">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <strong>
-                {isUtil ? 'CPU % Utilization' : 'Average Clock Frequency'}
-              </strong>
-              <span style={{ color: strokeColor, fontWeight: 700 }}>
-                {isUtil ? formatPercent(cpu.utilizationPercent) : formatFrequency(cpu.averageSpeedGhz)}
-              </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <strong>{isUtil ? 'CPU % Utilization Trend' : 'Average Clock Trend'}</strong>
+              <span style={{ color: '#94a3b8', fontSize: '12px' }}>Last 60 seconds</span>
             </div>
             <div className="chart-mode-toggle">
               <button
@@ -89,88 +71,96 @@ export default function ComputeDashboard({ hardware, history = [], compact = fal
               </button>
             </div>
           </div>
-
-          <svg role="img" aria-label="CPU activity graph over last 60 seconds" viewBox="0 0 500 120" preserveAspectRatio="none">
-            <defs>
-              <linearGradient id="util-gradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#10b981" stopOpacity="0.38" />
-                <stop offset="80%" stopColor="#10b981" stopOpacity="0.05" />
-                <stop offset="100%" stopColor="#10b981" stopOpacity="0" />
-              </linearGradient>
-              <linearGradient id="freq-gradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.38" />
-                <stop offset="80%" stopColor="#38bdf8" stopOpacity="0.05" />
-                <stop offset="100%" stopColor="#38bdf8" stopOpacity="0" />
-              </linearGradient>
-            </defs>
-
-            {/* Background Grid Lines (0%, 25%, 50%, 75%, 100%) */}
-            <line className="frequency-gridline" x1="8" x2="492" y1="20" y2="20" />
-            <line className="frequency-gridline" x1="8" x2="492" y1="41" y2="41" />
-            <line className="frequency-gridline" x1="8" x2="492" y1="62" y2="62" />
-            <line className="frequency-gridline" x1="8" x2="492" y1="83" y2="83" />
-            <line className="frequency-gridline" x1="8" x2="492" y1="104" y2="104" />
-
-            {/* Shaded Area Fill */}
-            {areaPolygon && <polygon points={areaPolygon} fill={`url(#${gradientId})`} />}
-
-            {/* Trend Polyline */}
-            {samples.length > 1 && (
-              <polyline
-                className="frequency-trend-line"
-                style={{ stroke: strokeColor }}
-                points={points}
+          {samples.length ? (
+            <svg role="img" aria-label="CPU average frequency trend over the last minute" viewBox="0 0 500 120" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="util-gradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#10b981" stopOpacity="0.4" />
+                  <stop offset="80%" stopColor="#10b981" stopOpacity="0.06" />
+                  <stop offset="100%" stopColor="#10b981" stopOpacity="0" />
+                </linearGradient>
+                <linearGradient id="freq-gradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.4" />
+                  <stop offset="80%" stopColor="#38bdf8" stopOpacity="0.06" />
+                  <stop offset="100%" stopColor="#38bdf8" stopOpacity="0" />
+                </linearGradient>
+              </defs>
+              <line className="frequency-gridline" x1="8" x2="492" y1="20" y2="20" />
+              <line className="frequency-gridline" x1="8" x2="492" y1="41" y2="41" />
+              <line className="frequency-gridline" x1="8" x2="492" y1="62" y2="62" />
+              <line className="frequency-gridline" x1="8" x2="492" y1="83" y2="83" />
+              <line className="frequency-gridline" x1="8" x2="492" y1="104" y2="104" />
+              {areaPolygon && <polygon points={areaPolygon} fill={`url(#${gradientId})`} />}
+              {samples.length > 1 && (
+                <polyline
+                  className="frequency-trend-line"
+                  style={{ stroke: strokeColor }}
+                  points={points}
+                />
+              )}
+              <circle
+                className="frequency-trend-dot"
+                style={{ fill: strokeColor, filter: `drop-shadow(0 0 6px ${strokeColor})` }}
+                cx={lastDotX}
+                cy={lastDotY}
+                r="4.5"
               />
-            )}
-
-            {/* Current Real-time Dot */}
-            <circle
-              className="frequency-trend-dot"
-              style={{ fill: strokeColor, filter: `drop-shadow(0 0 6px ${strokeColor})` }}
-              cx={lastDotX}
-              cy={lastDotY}
-              r="4.5"
-            />
-          </svg>
-
+            </svg>
+          ) : (
+            <div className="frequency-chart-empty">Waiting for valid telemetry samples</div>
+          )}
           <div className="frequency-chart-axis">
             <span>60s ago</span>
-            <span>{isUtil ? '50% Load' : `${(maxFrequency / 2).toFixed(2)} GHz`}</span>
-            <span>Now ({isUtil ? '100% max scale' : `${maxFrequency.toFixed(2)} GHz max`})</span>
+            <span>{isUtil ? 'Waveform (0 - 100%)' : `Dynamic clock (up to ${maxFrequency.toFixed(2)} GHz)`}</span>
+            <span>Now</span>
           </div>
         </div>
-
-        {/* Per-Core Frequency and Utilization Meters */}
         {!compact && (
           <div className="core-readings" aria-label="Per-core frequency and utilization">
-            {frequencies.length ? frequencies.map((frequency, index) => {
-              const frequencyPercent = Number.isFinite(frequency) ? Math.min((frequency / maxFrequency) * 100, 100) : 0;
-              const coreLoad = utilization[index];
-              const loadPercent = Number.isFinite(coreLoad) ? Math.max(0, Math.min(coreLoad, 100)) : 0;
-              return (
-                <div className="core-reading" key={`core-${index}`}>
-                  <div className="core-reading-heading">
-                    <span>Core {index}</span>
-                    <strong>{formatFrequency(frequency)}</strong>
-                    <span style={{ color: '#10b981' }}>{formatPercent(coreLoad)}</span>
+            {frequencies.length ? (
+              frequencies.map((frequency, index) => {
+                const frequencyPercent = Number.isFinite(frequency) ? Math.min((frequency / maxFrequency) * 100, 100) : 0;
+                const coreLoad = utilization[index];
+                const loadPercent = Number.isFinite(coreLoad) ? Math.max(0, Math.min(coreLoad, 100)) : 0;
+                return (
+                  <div className="core-reading" key={`core-${index}`}>
+                    <div className="core-reading-heading">
+                      <span>Core {index}</span>
+                      <strong>{formatFrequency(frequency)}</strong>
+                      <span>{formatPercent(coreLoad)}</span>
+                    </div>
+                    <div
+                      className="frequency-track"
+                      role="meter"
+                      aria-label={`Core ${index} frequency`}
+                      aria-valuemin="0"
+                      aria-valuemax={maxFrequency}
+                      aria-valuenow={Number.isFinite(frequency) ? frequency : 0}
+                    >
+                      <span style={{ width: `${frequencyPercent}%` }} />
+                    </div>
+                    <div
+                      className="utilization-track"
+                      role="meter"
+                      aria-label={`Core ${index} utilization`}
+                      aria-valuemin="0"
+                      aria-valuemax={100}
+                      aria-valuenow={loadPercent}
+                    >
+                      <span style={{ width: `${loadPercent}%` }} />
+                    </div>
                   </div>
-                  <div className="frequency-track" role="meter" aria-label={`Core ${index} frequency`} aria-valuemin="0" aria-valuemax={maxFrequency} aria-valuenow={Number.isFinite(frequency) ? frequency : 0}>
-                    <span style={{ width: `${frequencyPercent}%` }} />
-                  </div>
-                  <div className="utilization-track" role="meter" aria-label={`Core ${index} utilization`} aria-valuemin="0" aria-valuemax={100} aria-valuenow={loadPercent}>
-                    <span style={{ width: `${loadPercent}%` }} />
-                  </div>
-                </div>
-              );
-            }) : <p className="frequency-chart-empty">Per-core readings are unavailable</p>}
+                );
+              })
+            ) : (
+              <p className="frequency-chart-empty">Per-core frequency readings are unavailable</p>
+            )}
           </div>
         )}
-
-        {/* GPU Readings if present */}
-        {!compact && hardware.graphics.length > 0 && (
+        {!compact && (hardware.graphics || []).length > 0 && (
           <div className="gpu-readings">
             <div className="frequency-chart-heading">
-              <strong>GPU Clocks & Activity</strong>
+              <strong>GPU clocks & activity</strong>
               <span>Driver reported</span>
             </div>
             {hardware.graphics.map((gpu, index) => {
@@ -186,7 +176,14 @@ export default function ComputeDashboard({ hardware, history = [], compact = fal
                     <span>Memory {Number.isFinite(gpu.clockMemory) && gpu.clockMemory > 0 ? `${gpu.clockMemory} MHz` : 'N/A'}</span>
                     <span>{Number.isFinite(gpu.temperatureGpu) ? `${gpu.temperatureGpu} °C` : 'N/A'}</span>
                   </div>
-                  <div className="utilization-track" role="meter" aria-label={`Graphics processor ${index + 1} utilization`} aria-valuemin="0" aria-valuemax={100} aria-valuenow={gpuLoad}>
+                  <div
+                    className="utilization-track"
+                    role="meter"
+                    aria-label={`Graphics processor ${index + 1} utilization`}
+                    aria-valuemin="0"
+                    aria-valuemax={100}
+                    aria-valuenow={gpuLoad}
+                  >
                     <span style={{ width: `${gpuLoad}%` }} />
                   </div>
                 </div>

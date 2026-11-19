@@ -1,15 +1,28 @@
+import { useEffect, useState } from 'react';
 import { DataPanel, DataRow } from '../components/HardwareUI';
 import { useHardware } from '../context/HardwareContext';
 import { formatMemoryBytes } from '../lib/formatters';
+import { fetchApplicationsData } from '../services/applicationsService';
 
 export default function ApplicationsPage() {
   const { hardware } = useHardware();
-  if (!hardware) return null;
-  if (hardware.runtime !== 'desktop') return <DataPanel title="Applications" icon="grid"><DataRow label="Access" value="Application process monitoring requires the desktop app." /></DataPanel>;
+  const [menuData, setMenuData] = useState(null);
 
-  const applications = hardware.applications || [];
+  useEffect(() => {
+    let mounted = true;
+    fetchApplicationsData().then((data) => {
+      if (mounted && data) setMenuData(data);
+    });
+    return () => { mounted = false; };
+  }, []);
+
+  const activeHardware = menuData ? { ...hardware, ...menuData } : hardware;
+  if (!activeHardware) return null;
+  if (activeHardware.runtime !== 'desktop') return <DataPanel title="Applications" icon="grid"><DataRow label="Access" value="Application process monitoring requires the desktop app." /></DataPanel>;
+
+  const applications = activeHardware.applications || [];
   return <DataPanel title="Current user applications" icon="grid" className="application-panel">
-    {!hardware.applicationsSupported ? <p className="application-empty">Application process monitoring is currently unavailable on this platform.</p> : applications.length ? <>
+    {!activeHardware.applicationsSupported ? <p className="application-empty">Application process monitoring is currently unavailable on this platform.</p> : applications.length ? <>
       <div className="application-process-heading"><span>APPLICATION / PROCESS</span><span>CPU</span><span>MEMORY</span></div>
       <div className="application-process-list">{applications.map((application) => {
         const cpuPercent = Number.isFinite(application.cpuPercent) ? Math.max(application.cpuPercent, 0) : null;

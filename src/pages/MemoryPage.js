@@ -1,29 +1,42 @@
+import { useEffect, useState } from 'react';
 import { DataPanel, DataRow } from '../components/HardwareUI';
 import { useHardware } from '../context/HardwareContext';
 import { formatBytes, formatOptional, formatVoltage } from '../lib/formatters';
+import { fetchMemoryData } from '../services/memoryService';
 
 export default function MemoryPage() {
   const { hardware } = useHardware();
-  if (!hardware) return null;
-  if (hardware.runtime !== 'desktop') return <DataPanel title="Memory" icon="chip"><DataRow label="Installed memory" value={hardware.memory} /><DataRow label="Module details" value="Not exposed by browser APIs." /></DataPanel>;
+  const [menuData, setMenuData] = useState(null);
 
-  const modules = hardware.memory.modules || [];
+  useEffect(() => {
+    let mounted = true;
+    fetchMemoryData().then((data) => {
+      if (mounted && data) setMenuData(data);
+    });
+    return () => { mounted = false; };
+  }, []);
+
+  const activeHardware = menuData ? { ...hardware, ...menuData } : hardware;
+  if (!activeHardware) return null;
+  if (activeHardware.runtime !== 'desktop') return <DataPanel title="Memory" icon="chip"><DataRow label="Installed memory" value={activeHardware.memory} /><DataRow label="Module details" value="Not exposed by browser APIs." /></DataPanel>;
+
+  const modules = activeHardware.memory?.modules || [];
   const memoryTypes = [...new Set(modules.map(module => module.type).filter(Boolean))].join(' / ');
   return <div className="panel-grid">
     <DataPanel title="Memory controller" icon="chip">
-      <DataRow label="Installed / available" value={`${formatBytes(hardware.memory.totalBytes)} / ${formatBytes(hardware.memory.availableBytes)}`} />
+      <DataRow label="Installed / available" value={`${formatBytes(activeHardware.memory?.totalBytes)} / ${formatBytes(activeHardware.memory?.availableBytes)}`} />
       <DataRow label="Memory type" value={memoryTypes || 'Not reported'} />
-      <DataRow label="Channel mode" value={formatOptional(hardware.memory.channelMode)} />
-      <DataRow label="DRAM frequency" value={formatOptional(Number.isFinite(hardware.memory.dramFrequencyMhz) ? `${hardware.memory.dramFrequencyMhz} MHz` : hardware.memory.dramFrequencyMhz)} />
-      <DataRow label="Uncore frequency" value={formatOptional(Number.isFinite(hardware.memory.uncoreFrequencyMhz) ? `${hardware.memory.uncoreFrequencyMhz} MHz` : hardware.memory.uncoreFrequencyMhz)} />
-      <DataRow label="NB frequency" value={formatOptional(Number.isFinite(hardware.memory.nbFrequencyMhz) ? `${hardware.memory.nbFrequencyMhz} MHz` : hardware.memory.nbFrequencyMhz)} />
-      <DataRow label="FSB:DRAM" value={formatOptional(hardware.memory.fsbDram)} />
-      <DataRow label="CAS latency (CL)" value={formatOptional(hardware.memory.timings?.cl)} />
-      <DataRow label="RAS to CAS delay (tRCD)" value={formatOptional(hardware.memory.timings?.trcd)} />
-      <DataRow label="RAS precharge (tRP)" value={formatOptional(hardware.memory.timings?.trp)} />
-      <DataRow label="Cycle time (tRAS)" value={formatOptional(hardware.memory.timings?.tras)} />
-      <DataRow label="Bank cycle time (tRC)" value={formatOptional(hardware.memory.timings?.trc)} />
-      <DataRow label="Command rate (CR)" value={formatOptional(hardware.memory.timings?.commandRate)} />
+      <DataRow label="Channel mode" value={formatOptional(activeHardware.memory?.channelMode)} />
+      <DataRow label="DRAM frequency" value={formatOptional(Number.isFinite(activeHardware.memory?.dramFrequencyMhz) ? `${activeHardware.memory.dramFrequencyMhz} MHz` : activeHardware.memory?.dramFrequencyMhz)} />
+      <DataRow label="Uncore frequency" value={formatOptional(Number.isFinite(activeHardware.memory?.uncoreFrequencyMhz) ? `${activeHardware.memory.uncoreFrequencyMhz} MHz` : activeHardware.memory?.uncoreFrequencyMhz)} />
+      <DataRow label="NB frequency" value={formatOptional(Number.isFinite(activeHardware.memory?.nbFrequencyMhz) ? `${activeHardware.memory.nbFrequencyMhz} MHz` : activeHardware.memory?.nbFrequencyMhz)} />
+      <DataRow label="FSB:DRAM" value={formatOptional(activeHardware.memory?.fsbDram)} />
+      <DataRow label="CAS latency (CL)" value={formatOptional(activeHardware.memory?.timings?.cl)} />
+      <DataRow label="RAS to CAS delay (tRCD)" value={formatOptional(activeHardware.memory?.timings?.trcd)} />
+      <DataRow label="RAS precharge (tRP)" value={formatOptional(activeHardware.memory?.timings?.trp)} />
+      <DataRow label="Cycle time (tRAS)" value={formatOptional(activeHardware.memory?.timings?.tras)} />
+      <DataRow label="Bank cycle time (tRC)" value={formatOptional(activeHardware.memory?.timings?.trc)} />
+      <DataRow label="Command rate (CR)" value={formatOptional(activeHardware.memory?.timings?.commandRate)} />
     </DataPanel>
     <DataPanel title="SPD modules" icon="chip">
       {modules.length ? modules.map((module, index) => <div key={`${module.bank || module.partNum}-${index}`}>
@@ -42,15 +55,15 @@ export default function MemoryPage() {
       </div>) : <DataRow label="SPD module data" value="Not exposed by this OS or permission level" />}
     </DataPanel>
     <DataPanel title="NUMA, paging & ECC telemetry" icon="chip">
-      <DataRow label="NUMA node topography" value={hardware.dynamicTelemetry?.numaNodes?.length ? hardware.dynamicTelemetry.numaNodes.map(n => `${n.node}: CPUs ${n.cpulist || 'N/A'}`).join(' · ') : 'Single-node / not reported'} />
-      <DataRow label="NUMA distance / latency matrix" value={hardware.dynamicTelemetry?.numaNodes?.length ? hardware.dynamicTelemetry.numaNodes.map(n => `${n.node}: [${n.distance || '10'}]`).join(' · ') : 'Not reported'} />
-      <DataRow label="NUMA memory hit / miss ratio" value={hardware.dynamicTelemetry?.numaNodes?.length ? hardware.dynamicTelemetry.numaNodes.map(n => `${n.node}: ${n.hit ?? 0} hits / ${n.miss ?? 0} misses / ${n.foreign ?? 0} foreign`).join(' · ') : 'Not reported'} />
-      <DataRow label="Transparent HugePages (THP) state" value={hardware.dynamicTelemetry?.thpState || 'Not reported'} />
-      <DataRow label="Page table footprint" value={hardware.dynamicTelemetry?.pageTablesBytes != null ? `${formatBytes(hardware.dynamicTelemetry.pageTablesBytes)} · AnonHugePages ${formatBytes(hardware.dynamicTelemetry.anonHugePagesBytes || 0)}` : 'Not reported'} />
-      <DataRow label="HugePages pool & size" value={hardware.dynamicTelemetry?.hugePageSizeBytes != null ? `${hardware.dynamicTelemetry.hugePagesTotal ?? 0} pages × ${formatBytes(hardware.dynamicTelemetry.hugePageSizeBytes)}` : 'Not reported'} />
-      <DataRow label="TLB flush rates & remote IPIs" value={hardware.dynamicTelemetry?.tlbShootdownsTotal != null ? `${hardware.dynamicTelemetry.tlbShootdownsTotal.toLocaleString()} total shootdowns (${hardware.dynamicTelemetry.tlbShootdownsPerCpu.map((c, i) => `C${i}: ${c}`).join(' · ')})` : 'Not reported'} />
-      <DataRow label="Hardware memory scrubbing rate" value={hardware.dynamicTelemetry?.edacControllers?.length ? hardware.dynamicTelemetry.edacControllers.map(m => `${m.mc}: ${m.scrubRate || 'N/A'}`).join(' · ') : 'No EDAC memory controller active'} />
-      <DataRow label="Uncorrected / corrected ECC error count" value={hardware.dynamicTelemetry?.edacControllers?.length ? hardware.dynamicTelemetry.edacControllers.map(m => `${m.mc}: UE ${m.ueCount ?? 0} · CE ${m.ceCount ?? 0}`).join(' · ') : '0 errors (EDAC inactive or non-ECC RAM)'} />
+      <DataRow label="NUMA node topography" value={activeHardware.dynamicTelemetry?.numaNodes?.length ? activeHardware.dynamicTelemetry.numaNodes.map(n => `${n.node}: CPUs ${n.cpulist || 'N/A'}`).join(' · ') : 'Single-node / not reported'} />
+      <DataRow label="NUMA distance / latency matrix" value={activeHardware.dynamicTelemetry?.numaNodes?.length ? activeHardware.dynamicTelemetry.numaNodes.map(n => `${n.node}: [${n.distance || '10'}]`).join(' · ') : 'Not reported'} />
+      <DataRow label="NUMA memory hit / miss ratio" value={activeHardware.dynamicTelemetry?.numaNodes?.length ? activeHardware.dynamicTelemetry.numaNodes.map(n => `${n.node}: ${n.hit ?? 0} hits / ${n.miss ?? 0} misses / ${n.foreign ?? 0} foreign`).join(' · ') : 'Not reported'} />
+      <DataRow label="Transparent HugePages (THP) state" value={activeHardware.dynamicTelemetry?.thpState || 'Not reported'} />
+      <DataRow label="Page table footprint" value={activeHardware.dynamicTelemetry?.pageTablesBytes != null ? `${formatBytes(activeHardware.dynamicTelemetry.pageTablesBytes)} · AnonHugePages ${formatBytes(activeHardware.dynamicTelemetry.anonHugePagesBytes || 0)}` : 'Not reported'} />
+      <DataRow label="HugePages pool & size" value={activeHardware.dynamicTelemetry?.hugePageSizeBytes != null ? `${activeHardware.dynamicTelemetry.hugePagesTotal ?? 0} pages × ${formatBytes(activeHardware.dynamicTelemetry.hugePageSizeBytes)}` : 'Not reported'} />
+      <DataRow label="TLB flush rates & remote IPIs" value={activeHardware.dynamicTelemetry?.tlbShootdownsTotal != null ? `${activeHardware.dynamicTelemetry.tlbShootdownsTotal.toLocaleString()} total shootdowns (${(activeHardware.dynamicTelemetry.tlbShootdownsPerCpu || []).map((c, i) => `C${i}: ${c}`).join(' · ')})` : 'Not reported'} />
+      <DataRow label="Hardware memory scrubbing rate" value={activeHardware.dynamicTelemetry?.edacControllers?.length ? activeHardware.dynamicTelemetry.edacControllers.map(m => `${m.mc}: ${m.scrubRate || 'N/A'}`).join(' · ') : 'No EDAC memory controller active'} />
+      <DataRow label="Uncorrected / corrected ECC error count" value={activeHardware.dynamicTelemetry?.edacControllers?.length ? activeHardware.dynamicTelemetry.edacControllers.map(m => `${m.mc}: UE ${m.ueCount ?? 0} · CE ${m.ceCount ?? 0}`).join(' · ') : '0 errors (EDAC inactive or non-ECC RAM)'} />
     </DataPanel>
   </div>;
 }
