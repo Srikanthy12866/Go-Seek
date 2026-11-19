@@ -6,4 +6,8 @@ echo ========================================================
 echo Starting Go Seek Desktop Application (Windows)...
 echo ========================================================
 
-node "%~dp0node_modules\electron\cli.js" "%~dp0." --no-sandbox
+if exist "%~dp0node_modules\electron\dist\electron.exe" (
+  "%~dp0node_modules\electron\dist\electron.exe" "%~dp0." --no-sandbox
+) else (
+  npm run desktop:start
+)
