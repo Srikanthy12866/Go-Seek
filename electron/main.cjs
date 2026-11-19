@@ -18,7 +18,23 @@ process.on('unhandledRejection', (reason) => {
   log('Unhandled Rejection: ' + (reason?.stack || reason));
 });
 
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const electronApi = require('electron');
+if (typeof electronApi === 'string') {
+  log('Invoked in Node mode instead of Electron. Self-respawning as Electron...');
+  const { spawn } = require('node:child_process');
+  const cleanEnv = { ...process.env };
+  delete cleanEnv.ELECTRON_RUN_AS_NODE;
+  const child = spawn(electronApi, [path.join(__dirname, '..'), ...process.argv.slice(2)], {
+    env: cleanEnv,
+    stdio: 'ignore',
+    windowsHide: false,
+    detached: true,
+  });
+  child.unref();
+  process.exit(0);
+}
+
+const { app, BrowserWindow, ipcMain, shell } = electronApi;
 const systemInformation = require('systeminformation');
 
 const execFileAsync = promisify(execFile);
@@ -1062,13 +1078,12 @@ function createWindow() {
     log('Loading start url: ' + process.env.ELECTRON_START_URL);
     window.loadURL(process.env.ELECTRON_START_URL);
   } else {
-    // Check if localhost:3000 is running, otherwise load static build
+    // Check if dev server is running on 3000, otherwise immediately load build/index.html
     const http = require('node:http');
-    const req = http.get('http://localhost:3000', (res) => {
-      log('Dev server running on 3000, loading URL');
-      window.loadURL('http://localhost:3000');
-    });
-    req.on('error', () => {
+    let loaded = false;
+    const fallbackToBuild = () => {
+      if (loaded) return;
+      loaded = true;
       if (require('node:fs').existsSync(buildIndexPath)) {
         log('Loading build index: ' + buildIndexPath);
         window.loadFile(buildIndexPath);
@@ -1076,6 +1091,22 @@ function createWindow() {
         log('Fallback to localhost:3000');
         window.loadURL('http://localhost:3000');
       }
+    };
+    const req = http.get('http://127.0.0.1:3000', (res) => {
+      if (!loaded && res.statusCode === 200) {
+        loaded = true;
+        log('Dev server running on 3000, loading URL');
+        window.loadURL('http://127.0.0.1:3000');
+      } else {
+        fallbackToBuild();
+      }
+    });
+    req.setTimeout(800, () => {
+      req.destroy();
+      fallbackToBuild();
+    });
+    req.on('error', () => {
+      fallbackToBuild();
     });
   }
 
