@@ -18,9 +18,22 @@ export function Icon({ name, size = 18 }) {
 }
 
 export function DataRow({ label, value, mono = false }) {
-  return <div className="data-row"><span>{label}</span><strong className={mono ? 'mono' : ''}>{value || 'Not reported'}</strong></div>;
+  return (
+    <div className="data-row">
+      <span className="data-row-label">{label}</span>
+      <strong className={`data-row-value ${mono ? 'mono' : ''}`}>{value || 'Not reported'}</strong>
+    </div>
+  );
 }
 
 export function DataPanel({ title, icon, children, className = '' }) {
-  return <section className={`data-panel ${className}`}><div className="panel-heading"><span className="panel-icon"><Icon name={icon} size={17} /></span><h2>{title}</h2></div><div className="panel-content">{children}</div></section>;
+  return (
+    <section className={`data-panel ${className}`}>
+      <div className="panel-heading">
+        <span className="panel-icon"><Icon name={icon} size={18} /></span>
+        <h2>{title}</h2>
+      </div>
+      <div className="panel-content">{children}</div>
+    </section>
+  );
 }

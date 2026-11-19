@@ -24,7 +24,7 @@ export const formatVoltage = (value) => {
 
 export const formatCapacity = (value) => Number.isFinite(value) ? formatBytes(value) : typeof value === 'string' && value.trim() ? value : 'Not reported';
 
-export const unavailableReading = 'Not exposed by standard Linux hardware APIs';
+export const unavailableReading = 'Not reported by OS hardware APIs';
 
 export const formatOptional = (value, fallback = unavailableReading) => {
   if (value == null || value === '') return fallback;
