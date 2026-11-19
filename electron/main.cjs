@@ -1037,10 +1037,12 @@ async function getHardwareSnapshot() {
   };
 }
 
+let mainWindow = null;
+
 function createWindow() {
   log('createWindow called');
   const iconPath = path.join(__dirname, '..', 'mobile', 'assets', 'icon.png');
-  const window = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1440,
     height: 960,
     minWidth: 900,
@@ -1057,14 +1059,19 @@ function createWindow() {
     },
   });
 
-  window.once('ready-to-show', () => {
+  mainWindow.once('ready-to-show', () => {
     log('ready-to-show event fired');
-    window.show();
-    window.focus();
-    if (typeof window.restore === 'function') window.restore();
+    if (typeof mainWindow.restore === 'function') mainWindow.restore();
+    mainWindow.center();
+    mainWindow.show();
+    mainWindow.setAlwaysOnTop(true);
+    mainWindow.focus();
+    setTimeout(() => {
+      if (mainWindow) mainWindow.setAlwaysOnTop(false);
+    }, 300);
   });
 
-  window.webContents.setWindowOpenHandler(({ url }) => {
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) shell.openExternal(url);
     return { action: 'deny' };
   });
@@ -1073,10 +1080,10 @@ function createWindow() {
   const devServerUrl = process.env.ELECTRON_START_URL || 'http://localhost:3000';
   if (app.isPackaged) {
     log('Loading packaged file: ' + buildIndexPath);
-    window.loadFile(buildIndexPath);
+    mainWindow.loadFile(buildIndexPath);
   } else if (process.env.ELECTRON_START_URL) {
     log('Loading start url: ' + process.env.ELECTRON_START_URL);
-    window.loadURL(process.env.ELECTRON_START_URL);
+    mainWindow.loadURL(process.env.ELECTRON_START_URL);
   } else {
     // Check if dev server is running on 3000, otherwise immediately load build/index.html
     const http = require('node:http');
@@ -1086,17 +1093,17 @@ function createWindow() {
       loaded = true;
       if (require('node:fs').existsSync(buildIndexPath)) {
         log('Loading build index: ' + buildIndexPath);
-        window.loadFile(buildIndexPath);
+        mainWindow.loadFile(buildIndexPath);
       } else {
         log('Fallback to localhost:3000');
-        window.loadURL('http://localhost:3000');
+        mainWindow.loadURL('http://localhost:3000');
       }
     };
     const req = http.get('http://127.0.0.1:3000', (res) => {
       if (!loaded && res.statusCode === 200) {
         loaded = true;
         log('Dev server running on 3000, loading URL');
-        window.loadURL('http://127.0.0.1:3000');
+        mainWindow.loadURL('http://127.0.0.1:3000');
       } else {
         fallbackToBuild();
       }
@@ -1110,11 +1117,14 @@ function createWindow() {
     });
   }
 
-  window.webContents.on('did-finish-load', () => {
+  mainWindow.webContents.on('did-finish-load', () => {
     log('Window webContents did-finish-load');
   });
-  window.webContents.on('did-fail-load', (e, code, desc) => {
+  mainWindow.webContents.on('did-fail-load', (e, code, desc) => {
     log(`Window webContents did-fail-load: ${code} - ${desc}`);
+  });
+  mainWindow.on('closed', () => {
+    mainWindow = null;
   });
 }
 
@@ -1123,13 +1133,33 @@ ipcMain.handle('device:get-hardware-snapshot', async (event) => {
   return getHardwareSnapshot();
 });
 
-app.whenReady().then(() => {
-  log('app.whenReady resolved');
-  createWindow();
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  log('Another instance already running. Exiting second instance.');
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    log('Second instance attempted. Focusing primary window.');
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.center();
+      mainWindow.show();
+      mainWindow.setAlwaysOnTop(true);
+      mainWindow.focus();
+      setTimeout(() => {
+        if (mainWindow) mainWindow.setAlwaysOnTop(false);
+      }, 300);
+    }
   });
-});
+
+  app.whenReady().then(() => {
+    log('app.whenReady resolved');
+    createWindow();
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  });
+}
 
 app.on('window-all-closed', () => {
   log('window-all-closed fired');
