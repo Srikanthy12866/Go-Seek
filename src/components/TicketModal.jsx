@@ -93,7 +93,7 @@ export default function TicketModal({ isOpen, onClose, currentUser, hardwareSnap
 
       setSubmittedTicket(data);
     } catch (err) {
-      setError(err.message || 'Could not connect to ticketing service on port 8082.');
+      setError(err.message || 'Could not connect to support service. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -119,7 +119,7 @@ export default function TicketModal({ isOpen, onClose, currentUser, hardwareSnap
               Ticket ID: <strong>{submittedTicket.ticketCode}</strong>
             </p>
             <p className="success-desc">
-              Your issue report has been logged in <strong>app_db</strong> and an email notification has been dispatched to <strong>srikanthy12866@gmail.com</strong>.
+              Your issue report has been logged successfully and our support engineering team has been notified.
             </p>
             <div className="ticket-summary-box">
               <div><span>Title:</span> {submittedTicket.title}</div>

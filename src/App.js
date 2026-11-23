@@ -234,7 +234,7 @@ function AppLayout() {
 
           <footer className="page-footer">
             <span>GO SEEK SYSTEMS <span className="footer-divider">/</span> DEVICE REPORT</span>
-            <span>MICROSERVICE POWERED · DB: AUTH_DB &amp; APP_DB</span>
+            <span>COMMERCIAL ENTERPRISE EDITION · SECURE TELEMETRY</span>
             <span className="print-attribution">Powered by Srikanth Yepalagunta</span>
           </footer>
         </div>

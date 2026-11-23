@@ -162,7 +162,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
         </form>
 
         <div className="auth-footer-note">
-          Secured by Microservice Auth (Port 8081) · Database: auth_db
+          Secured with Enterprise 256-bit Encryption &amp; Multi-Factor Authentication
         </div>
       </div>
     </div>
