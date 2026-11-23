@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import ComputeDashboard from '../components/ComputeDashboard';
+import CpuBenchmark from '../components/CpuBenchmark';
 import { DataPanel, DataRow } from '../components/HardwareUI';
 import { useHardware } from '../context/HardwareContext';
 import { formatBytes, formatFrequency, formatOptional, formatVoltage, unavailableReading } from '../lib/formatters';
@@ -29,6 +30,10 @@ export default function ComputePage() {
       <div className="metric"><span className="metric-label">GRAPHICS ADAPTERS</span><strong className="metric-online">{(activeHardware.graphics || []).length}</strong><span className="metric-foot">DETECTED CONTROLLERS</span><span className="metric-glyph">04</span></div>
     </div>
     <ComputeDashboard hardware={activeHardware} history={frequencyHistory} />
+    <CpuBenchmark
+      cpuModel={activeHardware.soc?.name || 'Intel(R) Core(TM) i5-1035G1 CPU @ 1.00GHz'}
+      logicalCores={activeHardware.cpu?.logicalCores || 8}
+    />
     <div className="panel-grid">
       <DataPanel title="Processor & live clocks" icon="chip">
         <DataRow label="Processor name / specification" value={activeHardware.soc?.name} />

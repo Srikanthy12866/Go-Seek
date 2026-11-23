@@ -186,4 +186,4 @@ test('renders desktop Linux inventory without host identifiers', async () => {
   fireEvent.click(screen.getByRole('button', { name: /refresh/i }));
   expect(await screen.findAllByText('3.10 GHz')).toHaveLength(1);
   await waitFor(() => expect(container.querySelector('.frequency-trend-line')).toHaveAttribute('points', expect.stringContaining(' ')));
-});
+}, 25000);

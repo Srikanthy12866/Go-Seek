@@ -15,6 +15,7 @@ import EnvironmentPage from './pages/EnvironmentPage';
 import { searchParameters } from './lib/searchParameters';
 import AuthModal from './components/AuthModal';
 import TicketModal from './components/TicketModal';
+import ReportExportModal from './components/ReportExportModal';
 import { authStore } from './services/authStore';
 import './App.css';
 
@@ -41,6 +42,7 @@ function AppLayout() {
   // Authentication & Ticketing State (driven by centralized authStore)
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isTicketOpen, setIsTicketOpen] = useState(false);
+  const [isExportOpen, setIsExportOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState(() => authStore.getUser());
 
   useEffect(() => {
@@ -60,13 +62,7 @@ function AppLayout() {
     : sections.filter(section => !['storage', 'devices', 'applications'].includes(section.id));
 
   const exportReport = () => {
-    const blob = new Blob([JSON.stringify(hardware, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'device-report.json';
-    link.click();
-    URL.revokeObjectURL(url);
+    setIsExportOpen(true);
   };
 
   const copyReport = async () => {
@@ -257,6 +253,13 @@ function AppLayout() {
         onClose={() => setIsTicketOpen(false)}
         currentUser={currentUser}
         hardwareSnapshot={hardware}
+      />
+
+      {/* Executive Report Exporter */}
+      <ReportExportModal
+        isOpen={isExportOpen}
+        onClose={() => setIsExportOpen(false)}
+        hardware={hardware}
       />
     </div>
   );
