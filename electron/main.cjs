@@ -27,7 +27,109 @@ if (typeof electronApi === 'string') {
   process.exit(0);
 }
 
-const { app, BrowserWindow, ipcMain, shell } = electronApi;
+const { app, BrowserWindow, ipcMain, shell, Tray, Menu, Notification, nativeImage } = electronApi;
+
+let tray = null;
+let lastAlertTime = 0;
+
+function createTray() {
+  try {
+    const iconPath = path.join(__dirname, '..', 'public', 'favicon.ico');
+    const trayIcon = require('node:fs').existsSync(iconPath)
+      ? nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 })
+      : nativeImage.createEmpty();
+
+    tray = new Tray(trayIcon);
+    tray.setToolTip('Go-Seek Systems Telemetry | Initializing...');
+
+    const contextMenu = Menu.buildFromTemplate([
+      {
+        label: 'Show Go-Seek Systems',
+        click: () => {
+          if (mainWindow) {
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            mainWindow.show();
+            mainWindow.focus();
+          }
+        },
+      },
+      {
+        label: 'Quick Hardware Snapshot',
+        click: async () => {
+          try {
+            const snap = await getHardwareSnapshot();
+            const cpuLoad = snap.cpu?.utilizationPercent ? Math.round(snap.cpu.utilizationPercent) : 'N/A';
+            const memUsed = snap.memory?.usedPercent ? Math.round(snap.memory.usedPercent) : 'N/A';
+            if (Notification.isSupported()) {
+              new Notification({
+                title: 'Go-Seek Hardware Snapshot',
+                body: `CPU Utilization: ${cpuLoad}%\nMemory Usage: ${memUsed}%\nOperating System: ${snap.operatingSystem || 'Windows'}`,
+              }).show();
+            }
+          } catch (_) {}
+        },
+      },
+      { type: 'separator' },
+      {
+        label: 'Always on Top',
+        type: 'checkbox',
+        checked: false,
+        click: (item) => {
+          if (mainWindow) mainWindow.setAlwaysOnTop(item.checked);
+        },
+      },
+      { type: 'separator' },
+      {
+        label: 'Quit Go-Seek',
+        click: () => {
+          app.isQuitting = true;
+          app.quit();
+        },
+      },
+    ]);
+
+    tray.setContextMenu(contextMenu);
+    tray.on('double-click', () => {
+      if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    });
+  } catch (err) {
+    log('Failed to create tray: ' + err.message);
+  }
+}
+
+function startBackgroundMonitor() {
+  setInterval(async () => {
+    try {
+      if (!tray) return;
+      const [compute, mem] = await Promise.all([
+        computeMenu.getComputeData(),
+        memoryMenu.getMemoryData(),
+      ]);
+
+      const cpuLoad = Math.round(compute.cpu?.utilizationPercent || 0);
+      const memLoad = Math.round(mem.memory?.usedPercent || 0);
+      const clock = compute.cpu?.averageSpeedGhz ? compute.cpu.averageSpeedGhz.toFixed(2) + ' GHz' : 'Dynamic';
+
+      tray.setToolTip(`Go-Seek | CPU: ${cpuLoad}% (${clock}) · RAM: ${memLoad}%`);
+
+      // Alert if CPU sustained > 90% or RAM > 92% (throttle alerts to at most once every 5 minutes)
+      const now = Date.now();
+      if ((cpuLoad > 90 || memLoad > 92) && (now - lastAlertTime > 5 * 60 * 1000)) {
+        lastAlertTime = now;
+        if (Notification.isSupported()) {
+          new Notification({
+            title: cpuLoad > 90 ? '⚠️ High CPU Utilization Alert' : '⚠️ High Memory Pressure Alert',
+            body: `CPU is at ${cpuLoad}% utilization and RAM is at ${memLoad}%. Inspect details in Go-Seek.`,
+          }).show();
+        }
+      }
+    } catch (_) {}
+  }, 5000);
+}
 
 // Import segregated menu modules
 const overviewMenu = require('./menus/overview.cjs');
@@ -245,6 +347,18 @@ function createWindow() {
   mainWindow.webContents.on('did-fail-load', (e, code, desc) => {
     log(`Window webContents did-fail-load: ${code} - ${desc}`);
   });
+  mainWindow.on('close', (event) => {
+    if (!app.isQuitting) {
+      event.preventDefault();
+      mainWindow.hide();
+      if (Notification.isSupported()) {
+        new Notification({
+          title: 'Go-Seek Minimized to Tray',
+          body: 'Go-Seek continues monitoring in the background. Right-click or double-click tray icon to restore.',
+        }).show();
+      }
+    }
+  });
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -272,6 +386,8 @@ if (!gotTheLock) {
   app.whenReady().then(() => {
     log('app.whenReady resolved');
     createWindow();
+    createTray();
+    startBackgroundMonitor();
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
