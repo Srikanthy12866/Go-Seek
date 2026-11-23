@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { authStore } from '../services/authStore';
 import './TicketModal.css';
 
 const APP_API = process.env.REACT_APP_APP_API || 'https://go-seek-backend.onrender.com/api';
@@ -13,6 +14,15 @@ export default function TicketModal({ isOpen, onClose, currentUser, hardwareSnap
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [submittedTicket, setSubmittedTicket] = useState(null);
+  const [currentToken, setCurrentToken] = useState(() => authStore.getToken());
+  const [showToken, setShowToken] = useState(false);
+  const [tokenCopied, setTokenCopied] = useState(false);
+
+  useEffect(() => {
+    return authStore.subscribe(({ token }) => {
+      setCurrentToken(token);
+    });
+  }, []);
 
   if (!isOpen) return null;
 
@@ -63,10 +73,15 @@ export default function TicketModal({ isOpen, onClose, currentUser, hardwareSnap
       systemInfo,
     };
 
+    const headers = { 'Content-Type': 'application/json' };
+    if (currentToken) {
+      headers['Authorization'] = `Bearer ${currentToken}`;
+    }
+
     try {
       const response = await fetch(`${APP_API}/tickets`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(payload),
       });
 
@@ -123,6 +138,64 @@ export default function TicketModal({ isOpen, onClose, currentUser, hardwareSnap
               <p className="ticket-subtitle">
                 Found a telemetry anomaly or hardware readout issue? Submit a ticket and our development team will inspect it.
               </p>
+            </div>
+
+            {/* Updated Authentication Token in Project under Raise Issue */}
+            <div className="ticket-token-container" style={{
+              background: 'rgba(255, 255, 255, 0.04)',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              borderRadius: '8px',
+              padding: '10px 14px',
+              marginBottom: '16px',
+              fontSize: '12px'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ color: '#94a3b8', fontWeight: 600 }}>
+                  Active Project Token:
+                </span>
+                {currentToken ? (
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowToken(!showToken)}
+                      style={{ background: 'transparent', border: 'none', color: '#38bdf8', cursor: 'pointer', fontSize: '11px', textDecoration: 'underline' }}
+                    >
+                      {showToken ? 'Mask' : 'View'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(currentToken);
+                        setTokenCopied(true);
+                        setTimeout(() => setTokenCopied(false), 2000);
+                      }}
+                      style={{ background: 'transparent', border: 'none', color: tokenCopied ? '#10b981' : '#38bdf8', cursor: 'pointer', fontSize: '11px', textDecoration: 'underline' }}
+                    >
+                      {tokenCopied ? 'Copied!' : 'Copy'}
+                    </button>
+                  </div>
+                ) : (
+                  <span style={{ color: '#64748b', fontSize: '11px' }}>Unauthenticated (Guest)</span>
+                )}
+              </div>
+              {currentToken ? (
+                <div style={{
+                  fontFamily: 'monospace',
+                  color: '#e2e8f0',
+                  marginTop: '6px',
+                  wordBreak: 'break-all',
+                  fontSize: '11px',
+                  background: 'rgba(0,0,0,0.25)',
+                  padding: '6px 8px',
+                  borderRadius: '4px'
+                }}>
+                  {showToken ? currentToken : `${currentToken.substring(0, 16)}••••••••••••••••••••••••••••••••${currentToken.substring(currentToken.length - 8)}`}
+                </div>
+              ) : (
+                <div style={{ color: '#94a3b8', fontSize: '11px', marginTop: '4px' }}>
+                  Sign in to attach your verified account token to this issue ticket.
+                </div>
+              )}
             </div>
 
             {error && <div className="ticket-error-banner">{error}</div>}

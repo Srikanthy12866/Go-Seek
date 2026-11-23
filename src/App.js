@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { HashRouter, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { HardwareProvider, useHardware } from './context/HardwareContext';
 import { Icon } from './components/HardwareUI';
@@ -15,6 +15,7 @@ import EnvironmentPage from './pages/EnvironmentPage';
 import { searchParameters } from './lib/searchParameters';
 import AuthModal from './components/AuthModal';
 import TicketModal from './components/TicketModal';
+import { authStore } from './services/authStore';
 import './App.css';
 
 const sections = [
@@ -37,21 +38,19 @@ function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // Authentication & Ticketing State
+  // Authentication & Ticketing State (driven by centralized authStore)
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isTicketOpen, setIsTicketOpen] = useState(false);
-  const [currentUser, setCurrentUser] = useState(() => {
-    try {
-      const saved = localStorage.getItem('goseek_user');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
+  const [currentUser, setCurrentUser] = useState(() => authStore.getUser());
+
+  useEffect(() => {
+    return authStore.subscribe(({ user }) => {
+      setCurrentUser(user);
+    });
+  }, []);
 
   const handleLogout = () => {
-    localStorage.removeItem('goseek_token');
-    localStorage.removeItem('goseek_user');
+    authStore.clearAuth();
     setCurrentUser(null);
   };
 

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { authStore } from '../services/authStore';
 import './AuthModal.css';
 
 const AUTH_API = process.env.REACT_APP_AUTH_API || 'https://auth-service-v3f4.onrender.com/api/auth';
@@ -51,13 +52,13 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
         throw new Error(errorMsg);
       }
 
-      // Store auth session
-      localStorage.setItem('goseek_token', data.token);
-      localStorage.setItem('goseek_user', JSON.stringify({
+      // Store auth session globally in memory (token omitted from localStorage)
+      const user = {
         id: data.userId,
         name: data.name,
         email: data.email,
-      }));
+      };
+      authStore.setAuth(data.token, user);
 
       onAuthSuccess(data);
       onClose();
